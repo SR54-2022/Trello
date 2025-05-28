@@ -5,7 +5,7 @@ import { UserResponse } from '../member-addition/member-addition.component';
 import {BehaviorSubject, interval, Observable, Subscription, switchMap} from 'rxjs';
 import { AccountRequest } from '../models/account-request.model';
 import { LoginRequest } from '../models/login-request';
-import {Router} from "@angular/router";
+import {NavigationEnd, Router} from "@angular/router";
 import { jwtDecode } from 'jwt-decode';
 
 
@@ -23,24 +23,38 @@ export class AccountService {
   }
 
   initializeTokenVerification() {
-    const role = localStorage.getItem("role");
-    if (role) {
-      this.getUserIdFromBackend().subscribe(
-        (userId: string) => {
-          console.log("User ID from server:", userId);
-          this.userIdSource.next(userId);
-          this.startTokenVerification(userId);
-        },
-        (error) => {
-          console.error("Error fetching userId:", error);
-          this.logout().subscribe(() => {
-            this.router.navigate(['/login']);
-          });
+    this.router.events.subscribe(event => {
+      if (event instanceof NavigationEnd) {
+        const publicPrefixes = ['/verify/account', '/register', '/recovery', '/password/recovery', '/magic'];
+        const currentUrl = event.urlAfterRedirects;
+        console.log("Current URL after navigation:", currentUrl);
+
+        const isPublicRoute = publicPrefixes.some(prefix => currentUrl.startsWith(prefix));
+        if (isPublicRoute) {
+          console.log('Skipping token verification for public route:', currentUrl);
+          return;
         }
-      );
-    } else {
-      this.router.navigate(['/login']);
-    }
+
+        const role = localStorage.getItem("role");
+        if (role) {
+          this.getUserIdFromBackend().subscribe(
+            (userId: string) => {
+              console.log("User ID from server:", userId);
+              this.userIdSource.next(userId);
+              this.startTokenVerification(userId);
+            },
+            (error) => {
+              console.error("Error fetching userId:", error);
+              this.logout().subscribe(() => {
+                this.router.navigate(['/login']);
+              });
+            }
+          );
+        } else {
+          this.router.navigate(['/login']);
+        }
+      }
+    });
   }
 
   getUserIdFromBackend(): Observable<string> {
