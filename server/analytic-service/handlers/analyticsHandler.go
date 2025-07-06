@@ -20,7 +20,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
+
 	"strings"
 	"time"
 )
@@ -308,114 +308,115 @@ func (n *AnalyticsHandler) MiddlewareExtractUserFromCookie(next http.Handler) ht
 	})
 }
 
-func (n *AnalyticsHandler) verifyTokenWithUserService(ctx context.Context, token string) (string, string, error) {
+func (n *AnalyticsHandler) verifyTokenWithUserService(ctx context.Context,
+	token string) (string, string, error) {
 	ctx, span := n.tracer.Start(ctx, "NotificationHandler.verifyTokenWithUserService")
 	defer span.End()
-	linkToUserService := os.Getenv("LINK_TO_USER_SERVICE")
-	userServiceURL := fmt.Sprintf("%s/validate-token", linkToUserService)
-	reqBody := fmt.Sprintf(`{"token": "%s"}`, token)
 
+	userServiceURL, err := n.getUserServiceURL()
+	if err != nil {
+		return "", "", err
+	}
+
+	req, err := n.createRequest(ctx, userServiceURL, token, span)
+	if err != nil {
+		return "", "", err
+	}
+
+	client, err := createTLSClient()
+	if err != nil {
+		return "", "", err
+	}
+
+	circuitBreaker := n.createCircuitBreaker()
+	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
+
+	resp, err := n.executeRequestWithRetries(ctx, r, circuitBreaker, client, req)
+	if err != nil {
+		return "", "", err
+	}
+
+	return n.handleResponse(resp, span)
+}
+
+func (n *AnalyticsHandler) getUserServiceURL() (string, error) {
+	linkToUserService := os.Getenv("LINK_TO_USER_SERVICE")
+	return fmt.Sprintf("%s/validate-token", linkToUserService), nil
+}
+
+func (n *AnalyticsHandler) createRequest(ctx context.Context,
+	userServiceURL, token string, span trace.Span) (*http.Request, error) {
+	reqBody := fmt.Sprintf(`{"token": "%s"}`, token)
 	req, err := http.NewRequestWithContext(ctx, "POST", userServiceURL, strings.NewReader(reqBody))
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		n.logger.Printf("Failed to create token validation request: %v", err)
-		return "", "", err
+		n.recordError(err, "Failed to create token validation request", span)
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-	client, err := createTLSClient()
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		n.logger.Printf("Error creating TLS client: %v", err)
-		return "", "", err
-	}
+	return req, nil
+}
 
-	circuitBreaker := gobreaker.NewCircuitBreaker(
-		gobreaker.Settings{
-			Name:        "UserServiceCircuitBreaker",
-			MaxRequests: 5,
-			Timeout:     5 * time.Second,
-			Interval:    0,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				return counts.ConsecutiveFailures > 2
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				n.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
-			},
-			IsSuccessful: func(err error) bool {
-				if err == nil {
-					return true
-				}
-				if _, ok := err.(domain.ErrRespTmp); ok {
-					return false
-				}
-				return false
-			},
+func (n *AnalyticsHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
+	return gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "UserServiceCircuitBreaker",
+		MaxRequests: 5,
+		Timeout:     5 * time.Second,
+		Interval:    0,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures > 2
 		},
-	)
-
-	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
-	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
-
-	var timeout time.Duration
-	deadline, reqHasDeadline := ctx.Deadline()
-
-	var resp *http.Response
-	retryCount := 0
-
-	err = r.RunCtx(ctx, func(ctx context.Context) error {
-		retryCount++
-		n.logger.Printf("Attempting user-service request, attempt #%d", retryCount)
-
-		if reqHasDeadline {
-			timeout = time.Until(deadline)
-		}
-
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			if timeout > 0 {
-				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			n.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
+		},
+		IsSuccessful: func(err error) bool {
+			if err == nil {
+				return true
 			}
+			_, ok := err.(domain.ErrRespTmp)
+			return !ok
+		},
+	})
+}
 
-			resp, err = client.Do(req)
+func (n *AnalyticsHandler) executeRequestWithRetries(ctx context.Context, r *retrier.Retrier,
+	circuitBreaker *gobreaker.CircuitBreaker, client *http.Client, req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	err := r.RunCtx(ctx, func(ctx context.Context) error {
+		n.logger.Printf("Attempting user-service request")
+		_, err := circuitBreaker.Execute(func() (interface{}, error) {
+			resp, err := client.Do(req)
 			if err != nil {
 				return nil, err
 			}
-
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-				return nil, domain.ErrRespTmp{
-					URL:        resp.Request.URL.String(),
-					Method:     resp.Request.Method,
-					StatusCode: resp.StatusCode,
-				}
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("unexpected status code from user-service: %s", resp.Status)
-			}
-
-			return resp, nil
+			return n.checkResponse(resp)
 		})
-
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 
 	if err != nil {
 		n.logger.Printf("Error during user-service request after retries: %v", err)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", "", err
+		return nil, err
 	}
 
-	if resp == nil {
-		n.logger.Println("Received nil response from user service")
-		return "", "", fmt.Errorf("received nil response from user service")
-	}
+	return resp, nil
+}
 
+func (n *AnalyticsHandler) checkResponse(resp *http.Response) (interface{}, error) {
+	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return nil, domain.ErrRespTmp{
+			URL:        resp.Request.URL.String(),
+			Method:     resp.Request.Method,
+			StatusCode: resp.StatusCode,
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code from user-service: %s", resp.Status)
+	}
+	return resp, nil
+}
+
+func (n *AnalyticsHandler) handleResponse(resp *http.Response, span trace.Span) (string, string, error) {
 	defer resp.Body.Close()
 
 	var result struct {
@@ -423,18 +424,20 @@ func (n *AnalyticsHandler) verifyTokenWithUserService(ctx context.Context, token
 		Role   string `json:"role"`
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		n.logger.Printf("Error decoding response: %v", err)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		n.recordError(err, "Error decoding response", span)
 		return "", "", err
 	}
 
 	n.logger.Printf("ROLE IS %s", result.Role)
-
 	span.SetStatus(codes.Ok, "Successfully validated token")
 	return result.UserID, result.Role, nil
+}
+
+func (n *AnalyticsHandler) recordError(err error, message string, span trace.Span) {
+	n.logger.Printf("%s: %v", message, err)
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
 }
 
 func createTLSClient() (*http.Client, error) {

@@ -22,6 +22,12 @@ type AnalyticsRepo struct {
 	tracer trace.Tracer
 }
 
+const (
+	usersOnProject           = "users_on_project.user_id"
+	errFetchingProjectFormat = "Error fetching project: projectID=%s, error=%v"
+	errGeneric               = "[ERROR] %s"
+)
+
 func NewAnalyticsRepo(ctx context.Context, logger *log.Logger, tracer trace.Tracer) (*AnalyticsRepo, error) {
 	dburi := os.Getenv("MONGO_DB_URI")
 	if dburi == "" {
@@ -98,7 +104,7 @@ func (ar *AnalyticsRepo) AddMemberToProject(ctx context.Context, projectID strin
 
 	collection := ar.cli.Database("analytics_db").Collection("analytics")
 
-	filter := bson.M{"project_id": projectID, "users_on_project.user_id": bson.M{"$ne": memberID}}
+	filter := bson.M{"project_id": projectID, usersOnProject: bson.M{"$ne": memberID}}
 	update := bson.M{
 		"$push": bson.M{"users_on_project": bson.M{"user_id": memberID, "tasks_assigned": []interface{}{}}},
 		"$set":  bson.M{"last_updated": time.Now()},
@@ -126,7 +132,7 @@ func (ar *AnalyticsRepo) AssignTaskToUser(ctx context.Context, projectID string,
 
 	collection := ar.cli.Database("analytics_db").Collection("analytics")
 
-	filter := bson.M{"project_id": projectID, "users_on_project.user_id": memberID}
+	filter := bson.M{"project_id": projectID, usersOnProject: memberID}
 	update := bson.M{
 		"$push": bson.M{"users_on_project.$.tasks_assigned": bson.M{"task_id": taskID}},
 		"$set":  bson.M{"last_updated": time.Now()},
@@ -182,7 +188,7 @@ func (ar *AnalyticsRepo) RemoveTaskMember(ctx context.Context, projectID string,
 
 	collection := ar.cli.Database("analytics_db").Collection("analytics")
 
-	filter := bson.M{"project_id": projectID, "users_on_project.user_id": memberID}
+	filter := bson.M{"project_id": projectID, usersOnProject: memberID}
 	update := bson.M{
 		"$pull": bson.M{"users_on_project.$.tasks_assigned": bson.M{"task_id": taskID}},
 		"$set":  bson.M{"last_updated": time.Now()},
@@ -243,44 +249,87 @@ func (ar *AnalyticsRepo) UpdateTaskStatus(ctx context.Context, projectID string,
 	defer span.End()
 
 	ar.logger.Printf("[INFO] Updating task status: taskID=%s, projectID=%s, newStatus=%s", taskID, projectID, newStatus)
-	span.AddEvent("Fetching project from DB", trace.WithAttributes(attribute.String("projectID", projectID)))
 
+	_, err := ar.fetchProject(ctx, projectID, span)
+	if err != nil {
+		return err
+	}
+
+	task, err := ar.fetchTask(ctx, projectID, taskID, span)
+	if err != nil {
+		return err
+	}
+
+	prevStatus, taskIndex, err := ar.getPreviousStatus(task, taskID)
+	if err != nil {
+		return err
+	}
+
+	if err := ar.updatePreviousStateEnd(ctx, projectID, taskID, taskIndex); err != nil {
+		return err
+	}
+
+	if err := ar.pushNewState(ctx, projectID, taskID, newStatus, prevStatus, taskIndex); err != nil {
+		return err
+	}
+
+	if err := ar.UpdateProjectOnSchedule(ctx, projectID); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		ar.logger.Printf(errGeneric, err.Error())
+		return err
+	}
+
+	span.SetStatus(codes.Ok, "Task status updated successfully")
+	ar.logger.Printf("[INFO] Successfully updated task status: projectID=%s, taskID=%s, newStatus=%s", projectID, taskID, newStatus)
+	return nil
+}
+
+func (ar *AnalyticsRepo) fetchProject(ctx context.Context, projectID string, span trace.Span) (bson.M, error) {
+	span.AddEvent("Fetching project from DB", trace.WithAttributes(attribute.String("projectID", projectID)))
 	collection := ar.cli.Database("analytics_db").Collection("analytics")
 
 	var project bson.M
 	err := collection.FindOne(ctx, bson.M{"project_id": projectID}).Decode(&project)
 	if err != nil {
-		errMsg := fmt.Sprintf("Error fetching project: projectID=%s, error=%v", projectID, err)
+		errMsg := fmt.Sprintf(errFetchingProjectFormat, projectID, err)
+		ar.logger.Printf(errGeneric, errMsg)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, errMsg)
-		ar.logger.Printf("[ERROR] %s", errMsg)
-		return fmt.Errorf(errMsg)
+		return nil, fmt.Errorf(errMsg)
 	}
+	return project, nil
+}
 
+func (ar *AnalyticsRepo) fetchTask(ctx context.Context, projectID string, taskID string, span trace.Span) (bson.M, error) {
 	span.AddEvent("Fetching task details", trace.WithAttributes(attribute.String("taskID", taskID)))
+	collection := ar.cli.Database("analytics_db").Collection("analytics")
+
 	var task bson.M
-	err = collection.FindOne(ctx, bson.M{
+	err := collection.FindOne(ctx, bson.M{
 		"project_id":               projectID,
 		"tasks_time_spent.task_id": taskID,
 	}).Decode(&task)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error fetching task: projectID=%s, taskID=%s, error=%v", projectID, taskID, err)
+		ar.logger.Printf(errGeneric, errMsg)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, errMsg)
-		ar.logger.Printf("[ERROR] %s", errMsg)
-		return fmt.Errorf(errMsg)
+		return nil, fmt.Errorf(errMsg)
+	}
+	return task, nil
+}
+
+func (ar *AnalyticsRepo) getPreviousStatus(task bson.M, taskID string) (string, int, error) {
+	tasksTimeSpent, ok := task["tasks_time_spent"].(primitive.A)
+	if !ok {
+		errMsg := fmt.Sprintf("Invalid tasks_time_spent structure: taskID=%s", taskID)
+		ar.logger.Printf(errGeneric, errMsg)
+		return "", -1, fmt.Errorf(errMsg)
 	}
 
 	var prevStatus string
 	var taskIndex int
-	tasksTimeSpent, ok := task["tasks_time_spent"].(primitive.A)
-	if !ok {
-		errMsg := fmt.Sprintf("Invalid tasks_time_spent structure: projectID=%s, taskID=%s", projectID, taskID)
-		ar.logger.Printf("[ERROR] %s", errMsg)
-		span.RecordError(err)
-		return fmt.Errorf(errMsg)
-	}
-
 	for i, taskEntry := range tasksTimeSpent {
 		taskMap, ok := taskEntry.(primitive.M)
 		if !ok {
@@ -300,17 +349,16 @@ func (ar *AnalyticsRepo) UpdateTaskStatus(ctx context.Context, projectID string,
 	}
 
 	if prevStatus == "" {
-		errMsg := fmt.Sprintf("Previous task status missing: projectID=%s, taskID=%s", projectID, taskID)
-		ar.logger.Printf("[ERROR] %s", errMsg)
-		span.RecordError(err)
-		return fmt.Errorf(errMsg)
+		errMsg := fmt.Sprintf("Previous task status missing: taskID=%s", taskID)
+		ar.logger.Printf(errGeneric, errMsg)
+		return "", -1, fmt.Errorf(errMsg)
 	}
 
-	span.AddEvent("Updating task status", trace.WithAttributes(
-		attribute.String("prevStatus", prevStatus),
-		attribute.String("newStatus", newStatus),
-	))
+	return prevStatus, taskIndex, nil
+}
 
+func (ar *AnalyticsRepo) updatePreviousStateEnd(ctx context.Context, projectID string, taskID string, taskIndex int) error {
+	collection := ar.cli.Database("analytics_db").Collection("analytics")
 	filter := bson.M{"project_id": projectID, "tasks_time_spent.task_id": taskID}
 
 	updateEnd := bson.M{
@@ -326,14 +374,18 @@ func (ar *AnalyticsRepo) UpdateTaskStatus(ctx context.Context, projectID string,
 	}
 
 	opts := options.Update().SetArrayFilters(arrayFilters)
-	_, err = collection.UpdateOne(ctx, filter, updateEnd, opts)
+	_, err := collection.UpdateOne(ctx, filter, updateEnd, opts)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error updating previous state end time: projectID=%s, taskID=%s, error=%v", projectID, taskID, err)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, errMsg)
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
+	return nil
+}
+
+func (ar *AnalyticsRepo) pushNewState(ctx context.Context, projectID string, taskID string, newStatus string, prevStatus string, taskIndex int) error {
+	collection := ar.cli.Database("analytics_db").Collection("analytics")
+	filter := bson.M{"project_id": projectID, "tasks_time_spent.task_id": taskID}
 
 	updatePush := bson.M{
 		"$push": bson.M{
@@ -351,26 +403,12 @@ func (ar *AnalyticsRepo) UpdateTaskStatus(ctx context.Context, projectID string,
 		},
 	}
 
-	_, err = collection.UpdateOne(ctx, filter, updatePush)
+	_, err := collection.UpdateOne(ctx, filter, updatePush)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error pushing new state: projectID=%s, taskID=%s, error=%v", projectID, taskID, err)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, errMsg)
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
-
-	err = ar.UpdateProjectOnSchedule(ctx, projectID)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		ar.logger.Printf("[ERROR] %s", err.Error())
-		return err
-	}
-
-	span.SetStatus(codes.Ok, "Task status updated successfully")
-	span.AddEvent("Task status update completed")
-	ar.logger.Printf("[INFO] Successfully updated task status: projectID=%s, taskID=%s, newStatus=%s", projectID, taskID, newStatus)
 	return nil
 }
 
@@ -385,9 +423,9 @@ func (ar *AnalyticsRepo) UpdateProjectOnSchedule(ctx context.Context, projectID 
 	var project bson.M
 	err := collection.FindOne(ctx, bson.M{"project_id": projectID}).Decode(&project)
 	if err != nil {
-		errMsg := fmt.Sprintf("Error fetching project: projectID=%s, error=%v", projectID, err)
+		errMsg := fmt.Sprintf(errFetchingProjectFormat, projectID, err)
 		span.RecordError(err)
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
 
@@ -395,7 +433,7 @@ func (ar *AnalyticsRepo) UpdateProjectOnSchedule(ctx context.Context, projectID 
 	if !ok {
 		errMsg := "Invalid completion_estimate format"
 		span.RecordError(fmt.Errorf(errMsg))
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
 
@@ -403,7 +441,7 @@ func (ar *AnalyticsRepo) UpdateProjectOnSchedule(ctx context.Context, projectID 
 	if err != nil {
 		errMsg := fmt.Sprintf("Error parsing estimated_end_date: %s", estimatedEndDateStr)
 		span.RecordError(err)
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
 
@@ -433,7 +471,7 @@ func (ar *AnalyticsRepo) UpdateProjectOnSchedule(ctx context.Context, projectID 
 	if !ok {
 		errMsg := "Invalid tasks_by_status format"
 		span.RecordError(fmt.Errorf(errMsg))
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
 
@@ -458,7 +496,7 @@ func (ar *AnalyticsRepo) UpdateProjectOnSchedule(ctx context.Context, projectID 
 	if err != nil {
 		errMsg := fmt.Sprintf("Error updating project schedule status: projectID=%s, error=%v", projectID, err)
 		span.RecordError(err)
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return fmt.Errorf(errMsg)
 	}
 
@@ -477,9 +515,9 @@ func (ar *AnalyticsRepo) GetProjectAnalytics(ctx context.Context, projectID stri
 	var project bson.M
 	err := collection.FindOne(ctx, bson.M{"project_id": projectID}).Decode(&project)
 	if err != nil {
-		errMsg := fmt.Sprintf("Error fetching project: projectID=%s, error=%v", projectID, err)
+		errMsg := fmt.Sprintf(errFetchingProjectFormat, projectID, err)
 		span.RecordError(err)
-		ar.logger.Printf("[ERROR] %s", errMsg)
+		ar.logger.Printf(errGeneric, errMsg)
 		return nil, fmt.Errorf(errMsg)
 	}
 

@@ -47,42 +47,58 @@ export class MemberAdditionComponent implements OnInit {
 
     this.route.paramMap.subscribe(params => {
       this.projectId = params.get('projectId')!;
-
-      this.accountService.getAllUsers().subscribe({
-        next: (users: UserResponse[]) => {
-          this.allUsers = users.map(user => ({
-            id: user.id,
-            email: user.email
-          }));
-
-          this.projectService.getProjectById(this.projectId).subscribe({
-            next: (project: Project) => {
-              console.log('Project:', project);
-
-              const userIds = project.user_ids || [];
-
-              this.projectMembers = this.allUsers.filter(user =>
-                userIds.includes(user.id)
-              );
-              this.project = project;
-
-              this.minMembers = project.min_members;
-              this.maxMembers = project.max_members;
-
-              this.filteredUsers = this.allUsers.filter(user =>
-                !this.projectMembers.some(member => member.id === user.id)
-              );
-            },
-            error: (err) => {
-              console.error('Error retrieving project:', err);
-            }
-          });
-        },
-        error: (err) => {
-          console.error('Error retrieving users:', err);
-        }
-      });
+      this.loadUsersAndProject();
     });
+  }
+
+  private loadUsersAndProject() {
+    this.accountService.getAllUsers().subscribe({
+      next: (users: UserResponse[]) => this.handleUsersResponse(users),
+      error: (err) => this.handleUsersError(err)
+    });
+  }
+
+  private handleUsersResponse(users: UserResponse[]) {
+    this.allUsers = users.map(user => ({
+      id: user.id,
+      email: user.email
+    }));
+
+    this.loadProject();
+  }
+
+  private loadProject() {
+    this.projectService.getProjectById(this.projectId).subscribe({
+      next: (project: Project) => this.handleProjectResponse(project),
+      error: (err) => this.handleProjectError(err)
+    });
+  }
+
+  private handleProjectResponse(project: Project) {
+    console.log('Project:', project);
+
+    const userIds = project.user_ids || [];
+    this.projectMembers = this.allUsers.filter(user => userIds.includes(user.id));
+    this.project = project;
+
+    this.minMembers = project.min_members;
+    this.maxMembers = project.max_members;
+
+    this.updateFilteredUsers();
+  }
+
+  private updateFilteredUsers() {
+    this.filteredUsers = this.allUsers.filter(user =>
+      !this.projectMembers.some(member => member.id === user.id)
+    );
+  }
+
+  private handleUsersError(err: any) {
+    console.error('Error retrieving users:', err);
+  }
+
+  private handleProjectError(err: any) {
+    console.error('Error retrieving project:', err);
   }
 
 

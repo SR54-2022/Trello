@@ -19,6 +19,10 @@ type NotificationRepo struct {
 	tracer  trace.Tracer
 }
 
+const (
+	successfulFunc = "Successful function!"
+)
+
 func New(logger *log.Logger, tracer trace.Tracer) (*NotificationRepo, error) {
 	dbHost := os.Getenv("CASSANDRA_HOST")
 	if dbHost == "" {
@@ -97,7 +101,7 @@ func (repo *NotificationRepo) CreateTables() {
 		span.SetStatus(codes.Error, err.Error())
 		repo.logger.Println("Error creating index on user_id:", err)
 	}
-	span.SetStatus(codes.Ok, "Successful function!")
+	span.SetStatus(codes.Ok, successfulFunc)
 }
 
 func (repo *NotificationRepo) Create(ctx context.Context, notification *model.Notification) error {
@@ -125,7 +129,7 @@ func (repo *NotificationRepo) Create(ctx context.Context, notification *model.No
 		repo.logger.Println("Error inserting notification:", err)
 		return err
 	}
-	span.SetStatus(codes.Ok, "Successful function!")
+	span.SetStatus(codes.Ok, successfulFunc)
 	return nil
 }
 
@@ -156,7 +160,7 @@ func (repo *NotificationRepo) GetByID(ctx context.Context, id gocql.UUID) (*mode
 	}
 
 	notification.CreatedAt = notification.CreatedAt.In(location)
-	span.SetStatus(codes.Ok, "Successful function!")
+	span.SetStatus(codes.Ok, successfulFunc)
 	return &notification, nil
 }
 
@@ -185,7 +189,7 @@ func (repo *NotificationRepo) GetByUserID(ctx context.Context, userID string) ([
 		repo.logger.Println("Error closing iterator:", err)
 		return nil, err
 	}
-	span.SetStatus(codes.Ok, "Successful function!")
+	span.SetStatus(codes.Ok, successfulFunc)
 
 	return notifications, nil
 }
@@ -205,7 +209,7 @@ func (repo *NotificationRepo) UpdateStatus(ctx context.Context, createdAt time.T
 		repo.logger.Println("Error updating notification status:", err)
 		return err
 	}
-	span.SetStatus(codes.Ok, "Successful function!")
+	span.SetStatus(codes.Ok, successfulFunc)
 	return nil
 }
 
@@ -220,6 +224,6 @@ func (repo *NotificationRepo) Delete(ctx context.Context, id gocql.UUID) error {
 		repo.logger.Println("Error deleting notification:", err)
 		return err
 	}
-	span.SetStatus(codes.Ok, "Successful function!")
+	span.SetStatus(codes.Ok, successfulFunc)
 	return nil
 }

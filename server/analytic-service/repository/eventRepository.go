@@ -185,12 +185,37 @@ func (repo *ESDBClient) GetEventsByProjectID(ctx context.Context, projectID stri
 	defer span.End()
 
 	streamName := fmt.Sprintf(projectID)
-	var events []model.Event
 	redisKey := constructKeyForProject(projectID)
 
-	// Record the start time for Redis fetch
-	redisStart := time.Now()
+	// Try to fetch events from Redis
+	events, err := repo.fetchEventsFromRedis(ctx, redisKey, span)
+	if err != nil {
+		return nil, err
+	}
 
+	if len(events) > 0 {
+		log.Println("Returning events from Redis")
+		span.SetStatus(codes.Ok, "")
+		return events, nil
+	}
+
+	// Fetch events from EventStoreDB
+	events, err = repo.fetchEventsFromEventStoreDB(ctx, streamName, span)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache events in Redis
+	if err := repo.cacheEventsInRedis(redisKey, events, span); err != nil {
+		return nil, err
+	}
+
+	log.Println("Returning events from EventStoreDB")
+	span.SetStatus(codes.Ok, "")
+	return events, nil
+}
+
+func (repo *ESDBClient) fetchEventsFromRedis(ctx context.Context, redisKey string, span trace.Span) ([]model.Event, error) {
 	// Check if events exist in Redis
 	exists, err := repo.rds.Exists(redisKey).Result()
 	if err != nil {
@@ -211,27 +236,23 @@ func (repo *ESDBClient) GetEventsByProjectID(ctx context.Context, projectID stri
 		}
 
 		if jsonData != "" {
-			err = json.Unmarshal([]byte(jsonData), &events)
-			if err != nil {
+			var events []model.Event
+			if err := json.Unmarshal([]byte(jsonData), &events); err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())
 				log.Printf("Error unmarshalling Redis data: %v", err)
 				return nil, fmt.Errorf("failed to unmarshal Redis data: %w", err)
 			}
+			log.Printf("Fetched from Redis: %d events\n", len(events))
+			return events, nil
 		}
-		// Log Redis fetch duration
-		redisDuration := time.Since(redisStart)
-		log.Printf("Fetched from Redis in: %v\n", redisDuration)
-
-		log.Println("Returning from Redis woooo!")
-		span.SetStatus(codes.Ok, "")
-		return events, nil
 	}
 
-	// Record the start time for EventStoreDB fetch
-	eventStoreStart := time.Now()
+	return nil, nil
+}
 
-	// Read events from EventStoreDB
+func (repo *ESDBClient) fetchEventsFromEventStoreDB(ctx context.Context, streamName string, span trace.Span) ([]model.Event, error) {
+	var events []model.Event
 	readOpts := esdb.ReadStreamOptions{From: esdb.Start{}}
 	count := uint64(100)
 
@@ -266,18 +287,18 @@ func (repo *ESDBClient) GetEventsByProjectID(ctx context.Context, projectID stri
 		events = append(events, e)
 	}
 
-	// Log EventStoreDB fetch duration
-	eventStoreDuration := time.Since(eventStoreStart)
-	log.Printf("Fetched from EventStoreDB in: %v\n", eventStoreDuration)
+	log.Printf("Fetched from EventStoreDB: %d events\n", len(events))
+	return events, nil
+}
 
-	// Cache events in Redis
+func (repo *ESDBClient) cacheEventsInRedis(redisKey string, events []model.Event, span trace.Span) error {
 	if len(events) > 0 {
 		jsonData, err := json.Marshal(events)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			log.Printf("Error marshalling events for Redis: %v", err)
-			return nil, fmt.Errorf("failed to marshal events for Redis: %w", err)
+			return fmt.Errorf("failed to marshal events for Redis: %w", err)
 		}
 
 		err = repo.rds.Set(redisKey, jsonData, 3*time.Minute).Err()
@@ -285,11 +306,10 @@ func (repo *ESDBClient) GetEventsByProjectID(ctx context.Context, projectID stri
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			log.Printf("Error saving events to Redis: %v", err)
+			return fmt.Errorf("failed to save events to Redis: %w", err)
 		}
+		log.Println("Cached events in Redis")
 	}
 
-	log.Println("Redis is empty, caching is in progress")
-	log.Println("Returning from EventStoreDB :)")
-	span.SetStatus(codes.Ok, "")
-	return events, nil
+	return nil
 }

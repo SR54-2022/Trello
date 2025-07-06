@@ -34,6 +34,21 @@ type KeyProject struct{}
 type KeyUser struct{}
 type KeyRole struct{}
 
+const (
+	appJson         = "application/json"
+	contentType     = "Content-Type"
+	databaseErr     = "Database exception: %s"
+	jsonErr         = "Unable to convert to json "
+	userCtxErr      = "User ID not found in context"
+	invalidRole     = "Invalid role specified"
+	dataErr         = "Database error"
+	projectNotFound = "Project not found"
+	retrievingErr   = "Error retrieving project"
+	userMax         = "Cannot add more users than the maximum limit"
+	userMin         = "Cannot add users to a project without meeting the minimum member requirement"
+	natsErr         = "Error connecting to NATS:"
+)
+
 var pendingProjectDeletion = make(map[string]map[string]bool)
 
 type ProjectsHandler struct {
@@ -86,123 +101,143 @@ func ExtractTraceInfoMiddleware(next http.Handler) http.Handler {
 func (p *ProjectsHandler) verifyTokenWithUserService(ctx context.Context, token string) (string, string, error) {
 	ctx, span := p.tracer.Start(ctx, "ProjectsHandler.verifyTokenWithUserService")
 	defer span.End()
-	linkToUserServer := os.Getenv("LINK_TO_USER_SERVICE")
-	userServiceURL := fmt.Sprintf("%s/validate-token", linkToUserServer) // Use HTTPS for secure connection
-	reqBody := fmt.Sprintf(`{"token": "%s"}`, token)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", userServiceURL, strings.NewReader(reqBody))
+	userServiceUrl, err := p.getUserServiceURL()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return "", "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
+
+	req, err := p.createRequest(ctx, userServiceUrl, token, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", "", err
+	}
+
+	cl, err := createTLSClient()
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", "", err
+	}
+
+	circuitBreaker := p.createCircuitBreaker()
+	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
+
+	resp, err := p.executeRequestWithRetries(ctx, r, circuitBreaker, cl, req)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", "", err
+	}
+
+	return p.handleResponse(resp, span)
+}
+
+func (p *ProjectsHandler) getUserServiceURL() (string, error) {
+	linkToUserService := os.Getenv("LINK_TO_USER_SERVICE")
+	return fmt.Sprintf("%s/validate-token", linkToUserService), nil
+}
+
+func (p *ProjectsHandler) createRequest(ctx context.Context, userServiceUrl,
+	token string, span trace.Span) (*http.Request, error) {
+	reqBody := fmt.Sprintf(`{"token": "%s"}`, token)
+	req, err := http.NewRequestWithContext(ctx, "POST", userServiceUrl, strings.NewReader(reqBody))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	req.Header.Set(contentType, appJson)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-	c, err := createTLSClient()
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", "", fmt.Errorf("failed to create TLS client: %s", err)
-	}
+	return req, nil
+}
 
-	circuitBreaker := gobreaker.NewCircuitBreaker(
-		gobreaker.Settings{
-			Name:        "UserServiceCircuitBreaker",
-			MaxRequests: 5,
-			Timeout:     5 * time.Second,
-			Interval:    0,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				return counts.ConsecutiveFailures > 2
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				p.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'", name, from, to)
-			},
-			IsSuccessful: func(err error) bool {
-				if err == nil {
-					return true
-				}
-				if _, ok := err.(domain.ErrRespTmp); ok {
-					return false
-				}
-				return false
-			},
+func (p *ProjectsHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
+	return gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "UserServiceCircuitBreaker",
+		MaxRequests: 5,
+		Interval:    0,
+		Timeout:     5 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures > 2
 		},
-	)
-
-	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
-	retryAgain := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
-
-	var timeout time.Duration
-	deadline, reqHasDeadline := ctx.Deadline()
-
-	var userID, role string
-	retryCount := 0
-
-	err = retryAgain.RunCtx(ctx, func(ctx context.Context) error {
-		retryCount++
-		p.logger.Printf("Attempting validate-token request, attempt #%d", retryCount)
-
-		if reqHasDeadline {
-			timeout = time.Until(deadline)
-		}
-
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			if timeout > 0 {
-				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			p.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'", name, from, to)
+		},
+		IsSuccessful: func(err error) bool {
+			if err == nil {
+				return true
 			}
-
-			resp, err := c.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-				return nil, domain.ErrRespTmp{
-					URL:        resp.Request.URL.String(),
-					Method:     resp.Request.Method,
-					StatusCode: resp.StatusCode,
-				}
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
-			}
-
-			var result struct {
-				UserID string `json:"user_id"`
-				Role   string `json:"role"`
-			}
-
-			err = json.NewDecoder(resp.Body).Decode(&result)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			userID = result.UserID
-			role = result.Role
-
-			return result, nil
-		})
-
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return err
-		}
-		return nil
+			_, ok := err.(domain.ErrRespTmp)
+			return !ok
+		},
 	})
+}
 
+func (p *ProjectsHandler) executeRequestWithRetries(ctx context.Context, r *retrier.Retrier,
+	circuitBreaker *gobreaker.CircuitBreaker, client *http.Client, req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	err := r.RunCtx(ctx, func(ctx context.Context) error {
+		p.logger.Println("Attempting execute request")
+		_, err := circuitBreaker.Execute(func() (interface{}, error) {
+			resp, err := client.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			return p.checkResponse(resp)
+		})
+		return err
+	})
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		p.logger.Printf("Error during validate-token request after retries: %v", err)
-		return "", "", fmt.Errorf("error validating token: %w", err)
+		p.logger.Printf("Error during execute request: %v", err)
+		return nil, err
 	}
-	span.SetStatus(codes.Ok, "")
-	return userID, role, nil
+
+	return resp, nil
+}
+
+func (p *ProjectsHandler) checkResponse(resp *http.Response) (interface{}, error) {
+	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return nil, domain.ErrRespTmp{
+			URL:        resp.Request.URL.String(),
+			Method:     resp.Request.Method,
+			StatusCode: resp.StatusCode,
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return resp, nil
+}
+
+func (p *ProjectsHandler) handleResponse(resp *http.Response, span trace.Span) (string, string, error) {
+	defer resp.Body.Close()
+
+	var result struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		span.RecordError(err)
+		p.recordError(err, "Error decoding response", span)
+		return "", "", fmt.Errorf("error decoding response: %w", err)
+	}
+
+	p.logger.Printf("ROLE IS %s", result.Role)
+	span.SetStatus(codes.Ok, "Successfully validated token")
+	return result.UserID, result.Role, nil
+}
+
+func (p *ProjectsHandler) recordError(err error, message string, span trace.Span) {
+	p.logger.Printf("%s : %v", message, err)
+	span.RecordError(err)
+	span.SetStatus(codes.Error, message)
 }
 
 func createTLSClient() (*http.Client, error) {
@@ -246,7 +281,7 @@ func (p *ProjectsHandler) GetAllProjects(rw http.ResponseWriter, h *http.Request
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		p.logger.Print("Database exception: ", err)
+		p.logger.Print(fmt.Sprintf(databaseErr, err.Error()))
 	}
 
 	if projects == nil {
@@ -257,8 +292,8 @@ func (p *ProjectsHandler) GetAllProjects(rw http.ResponseWriter, h *http.Request
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		p.logger.Fatal("Unable to convert to json :", err)
+		http.Error(rw, jsonErr, http.StatusInternalServerError)
+		p.logger.Fatal(jsonErr, err)
 		return
 	}
 	span.SetStatus(codes.Ok, "Successfully got projects")
@@ -283,8 +318,8 @@ func (p *ProjectsHandler) GetAllProjectsByUser(rw http.ResponseWriter, h *http.R
 		span.RecordError(errors.New("No role found in context"))
 		span.SetStatus(codes.Error, errors.New("No rule found").Error())
 		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		p.logger.Println("User ID not found in context")
-		p.custLogger.Warn(nil, "User ID not found in context")
+		p.logger.Println(userCtxErr)
+		p.custLogger.Warn(nil, userCtxErr)
 		return
 	}
 
@@ -315,11 +350,11 @@ func (p *ProjectsHandler) GetAllProjectsByUser(rw http.ResponseWriter, h *http.R
 	} else {
 		span.RecordError(errors.New("There is an error"))
 		span.SetStatus(codes.Error, errors.New("There is an error").Error())
-		http.Error(rw, "Invalid role specified", http.StatusBadRequest)
-		p.logger.Println("Invalid role specified")
+		http.Error(rw, invalidRole, http.StatusBadRequest)
+		p.logger.Println(invalidRole)
 		p.custLogger.Warn(logrus.Fields{
 			"role": role,
-		}, "Invalid role specified")
+		}, invalidRole)
 		return
 	}
 
@@ -327,14 +362,14 @@ func (p *ProjectsHandler) GetAllProjectsByUser(rw http.ResponseWriter, h *http.R
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		p.logger.Print("Database exception: ", err)
-		p.logger.Print("Database exception:", err)
+		p.logger.Print(fmt.Sprintf(databaseErr, err.Error()))
+		p.logger.Print(fmt.Sprintf(databaseErr, err.Error()))
 		p.custLogger.Error(logrus.Fields{
 			"user_id": userId,
 			"role":    role,
 			"error":   err.Error(),
-		}, "Database exception occurred")
-		http.Error(rw, "Database error", http.StatusInternalServerError)
+		}, databaseErr)
+		http.Error(rw, dataErr, http.StatusInternalServerError)
 		return
 	}
 
@@ -355,13 +390,13 @@ func (p *ProjectsHandler) GetAllProjectsByUser(rw http.ResponseWriter, h *http.R
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
+		http.Error(rw, jsonErr, http.StatusInternalServerError)
 		p.custLogger.Error(logrus.Fields{
 			"user_id": userId,
 			"role":    role,
 			"error":   err.Error(),
 		}, "Unable to convert projects to JSON")
-		http.Error(rw, "Unable to convert to JSON", http.StatusInternalServerError)
+		http.Error(rw, jsonErr, http.StatusInternalServerError)
 		p.logger.Fatal("Unable to convert projects to JSON:", err)
 		return
 	}
@@ -391,13 +426,13 @@ func (p *ProjectsHandler) GetProjectById(rw http.ResponseWriter, h *http.Request
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		p.logger.Print("Database exception: ", err)
-		p.logger.Printf("Database exception: %v", err)
+		p.logger.Print(fmt.Sprintf(databaseErr, err.Error()))
+		p.logger.Printf(fmt.Sprintf(databaseErr, err.Error()))
 		p.custLogger.Error(logrus.Fields{
 			"project_id": id,
 			"error":      err.Error(),
 		}, "Database exception while fetching project by ID")
-		http.Error(rw, "Database error", http.StatusInternalServerError)
+		http.Error(rw, dataErr, http.StatusInternalServerError)
 		return
 	}
 
@@ -411,7 +446,7 @@ func (p *ProjectsHandler) GetProjectById(rw http.ResponseWriter, h *http.Request
 		p.logger.Printf("Project with ID: '%s' not found", id)
 		p.custLogger.Warn(logrus.Fields{
 			"project_id": id,
-		}, "Project not found")
+		}, projectNotFound)
 		return
 	}
 
@@ -447,8 +482,8 @@ func (p *ProjectsHandler) PostProject(rw http.ResponseWriter, h *http.Request) {
 	project, ok := h.Context().Value(KeyProject{}).(*model.Project)
 	if !ok {
 		http.Error(rw, "Invalid project data", http.StatusBadRequest)
-		p.logger.Println("Failed to retrieve project from context")
-		p.custLogger.Warn(nil, "Failed to retrieve project from context")
+		p.logger.Println(retrievingErr)
+		p.custLogger.Warn(nil, retrievingErr)
 		return
 	}
 
@@ -463,7 +498,7 @@ func (p *ProjectsHandler) PostProject(rw http.ResponseWriter, h *http.Request) {
 	id, err := p.repo.Insert(ctx, project)
 	project.ID = id
 	if err != nil {
-		http.Error(rw, "Database error", http.StatusInternalServerError)
+		http.Error(rw, dataErr, http.StatusInternalServerError)
 		p.logger.Printf("Error inserting project into database: %v", err)
 		p.custLogger.Error(logrus.Fields{
 			"project_name": project.Name,
@@ -504,7 +539,7 @@ func (p *ProjectsHandler) MiddlewareContentTypeSet(next http.Handler) http.Handl
 	return http.HandlerFunc(func(rw http.ResponseWriter, h *http.Request) {
 		p.logger.Println("Method [", h.Method, "] - Hit path :", h.URL.Path)
 
-		rw.Header().Add("Content-Type", "application/json")
+		rw.Header().Add(contentType, appJson)
 
 		next.ServeHTTP(rw, h)
 	})
@@ -553,12 +588,12 @@ func (p *ProjectsHandler) AddUsersToProject(rw http.ResponseWriter, h *http.Requ
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
-		http.Error(rw, "Error retrieving project", http.StatusInternalServerError)
-		p.logger.Println("Error retrieving project:", err)
+		http.Error(rw, retrievingErr, http.StatusInternalServerError)
+		p.logger.Println(retrievingErr, err)
 		p.custLogger.Error(logrus.Fields{
 			"project_id": projectId,
 			"error":      err.Error(),
-		}, "Failed to retrieve project")
+		}, retrievingErr)
 		return
 	}
 
@@ -568,10 +603,10 @@ func (p *ProjectsHandler) AddUsersToProject(rw http.ResponseWriter, h *http.Requ
 		span.RecordError(errors.New("Unable to get user id"))
 		span.SetStatus(codes.Error, "Unable to get user id")
 		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		p.logger.Println("User ID not found in context")
+		p.logger.Println(userCtxErr)
 		p.custLogger.Warn(logrus.Fields{
 			"project_id": projectId,
-		}, "User ID not found in context")
+		}, userCtxErr)
 		return
 	}
 
@@ -629,9 +664,9 @@ func (p *ProjectsHandler) AddUsersToProject(rw http.ResponseWriter, h *http.Requ
 
 	currentMembersCount := len(userIds)
 	if currentMembersCount > maxMembers {
-		span.RecordError(errors.New("Cannot add more users than the maximum limit"))
-		span.SetStatus(codes.Error, "Cannot add more users than the maximum limit")
-		http.Error(rw, "Cannot add more users than the maximum limit", http.StatusForbidden)
+		span.RecordError(errors.New(userMax))
+		span.SetStatus(codes.Error, userMax)
+		http.Error(rw, userMax, http.StatusForbidden)
 		p.logger.Printf("Too many users for project %s: current=%d, max=%d", projectId, currentMembersCount, maxMembers)
 		p.custLogger.Warn(logrus.Fields{
 			"project_id":      projectId,
@@ -642,9 +677,9 @@ func (p *ProjectsHandler) AddUsersToProject(rw http.ResponseWriter, h *http.Requ
 	}
 
 	if currentMembersCount < minMembers {
-		span.RecordError(errors.New("Cannot add users to a project without meeting the minimum member requirement"))
-		span.SetStatus(codes.Error, "Cannot add users to a project without meeting the minimum member requirement")
-		http.Error(rw, "Cannot add users to a project without meeting the minimum member requirement", http.StatusForbidden)
+		span.RecordError(errors.New(userMin))
+		span.SetStatus(codes.Error, userMin)
+		http.Error(rw, userMin, http.StatusForbidden)
 		p.logger.Printf("Too few users for project %s: current=%d, min=%d", projectId, currentMembersCount, minMembers)
 		p.custLogger.Warn(logrus.Fields{
 			"project_id":      projectId,
@@ -734,23 +769,23 @@ func (p *ProjectsHandler) RemoveUserFromProject(rw http.ResponseWriter, h *http.
 	project, err := p.repo.GetById(ctx, projectId)
 	// Retrieve project details
 	if err != nil {
-		http.Error(rw, "Error retrieving project", http.StatusInternalServerError)
+		http.Error(rw, retrievingErr, http.StatusInternalServerError)
 		p.logger.Printf("Error retrieving project with ID %s: %v", projectId, err)
 		p.custLogger.Error(logrus.Fields{
 			"project_id": projectId,
 			"error":      err.Error(),
-		}, "Failed to retrieve project")
+		}, retrievingErr)
 		return
 	}
 
 	if project == nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Project not found", http.StatusNotFound)
+		http.Error(rw, projectNotFound, http.StatusNotFound)
 		p.logger.Printf("Project with ID %s not found", projectId)
 		p.custLogger.Warn(logrus.Fields{
 			"project_id": projectId,
-		}, "Project not found")
+		}, projectNotFound)
 		return
 	}
 
@@ -862,7 +897,7 @@ func (p *ProjectsHandler) sendEventToAnalyticsService(ctx context.Context, event
 		return err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentType, appJson)
 	otel.GetTextMapPropagator().Inject(context.Background(), propagation.HeaderCarrier(req.Header))
 	client, err := createTLSClient()
 	if err != nil {
@@ -900,23 +935,23 @@ func (p *ProjectsHandler) DeleteProject(rw http.ResponseWriter, h *http.Request)
 
 	project, err := p.repo.GetById(ctx, projectId)
 	if err != nil {
-		http.Error(rw, "Error retrieving project", http.StatusInternalServerError)
+		http.Error(rw, retrievingErr, http.StatusInternalServerError)
 		p.logger.Printf("Error retrieving project with ID %s: %v", projectId, err)
 		p.custLogger.Error(logrus.Fields{
 			"project_id": projectId,
 			"error":      err.Error(),
-		}, "Failed to retrieve project")
+		}, retrievingErr)
 		return
 	}
 
 	if project == nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Project not found", http.StatusNotFound)
+		http.Error(rw, projectNotFound, http.StatusNotFound)
 		p.logger.Printf("Project with ID %s not found", projectId)
 		p.custLogger.Warn(logrus.Fields{
 			"project_id": projectId,
-		}, "Project not found")
+		}, projectNotFound)
 		return
 	}
 
@@ -943,7 +978,7 @@ func (p *ProjectsHandler) DeleteProject(rw http.ResponseWriter, h *http.Request)
 
 	nc, err := Conn()
 	if err != nil {
-		log.Println("Error connecting to NATS:", err)
+		log.Println(natsErr, err)
 		http.Error(rw, "Failed to connect to message broker", http.StatusInternalServerError)
 		return
 	}
@@ -978,8 +1013,8 @@ func (p *ProjectsHandler) SubscribeToEvent(ctx context.Context) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		log.Println("Error connecting to NATS:", err)
-		p.logger.Printf("Error connecting to NATS: ", err)
+		log.Println(natsErr, err)
+		p.logger.Printf(natsErr, err)
 
 		return
 	} else {
@@ -1125,153 +1160,133 @@ func (p *ProjectsHandler) HandleTasksDeletedRollback(ctx context.Context, projec
 }
 
 func (ph *ProjectsHandler) checkTasks(ctx context.Context, project model.Project, userID string, authTokenCookie *http.Cookie) bool {
-	// Start a new trace span for distributed tracing
 	ctx, span := ph.tracer.Start(ctx, "ProjectsHandler.checkTasks")
 	defer span.End()
 
-	// Create the custom TLS client for secure communication
 	c, err := createTLSClient()
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		ph.logger.Printf("Error creating TLS client: %v\n", err)
-		return false
+		return ph.handleError(span, "Error creating TLS client", err)
 	}
 
-	// Prepare the request to the task service
-	taskServiceURL := fmt.Sprintf("https://task-server:8080/tasks/%s", project.ID.Hex())
-
-	taskReq, err := http.NewRequestWithContext(ctx, "GET", taskServiceURL, nil)
+	taskReq, err := ph.createTaskRequest(ctx, project.ID.Hex(), authTokenCookie)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		ph.logger.Println("Failed to create request to task-service:", err)
-		return false
+		return ph.handleError(span, "Failed to create request to task-service", err)
 	}
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(taskReq.Header))
-	taskReq.Header.Set("Content-Type", "application/json")
-	taskReq.AddCookie(authTokenCookie)
 
-	// Circuit breaker and retry mechanism for resilience
-	circuitBreaker := gobreaker.NewCircuitBreaker(
-		gobreaker.Settings{
-			Name:        "TaskServiceCircuitBreaker",
-			MaxRequests: 5,
-			Timeout:     5 * time.Second,
-			Interval:    0,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				return counts.ConsecutiveFailures > 2
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				ph.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'", name, from, to)
-			},
-			IsSuccessful: func(err error) bool {
-				if err == nil {
-					return true
-				}
-				if _, ok := err.(domain.ErrRespTmp); ok {
-					return false
-				}
-				return false
-			},
-		},
-	)
-
-	// Set up the retryAgain with backoff strategy for retrying the request
-	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
-	retryAgain := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
-
-	var timeout time.Duration
-	deadline, reqHasDeadline := ctx.Deadline()
+	circuitBreaker := ph.createCircuitBreakerForTaskService()
+	retryAgain := ph.createRetrier()
 
 	var taskResp *http.Response
-	retryCount := 0
-
-	// Retry the task request if it fails (with circuit breaker)
 	err = retryAgain.RunCtx(ctx, func(ctx context.Context) error {
-		retryCount++
-		ph.logger.Printf("Attempting task-service request, attempt #%d", retryCount)
-
-		if reqHasDeadline {
-			timeout = time.Until(deadline)
-		}
-
-		// Execute the circuit breaker logic for the task request
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			if timeout > 0 {
-				taskReq.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
-			}
-
-			// Send the HTTP request using the TLS client
-			resp, err := c.Do(taskReq)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			// Handle the case where the service is unavailable or timed out
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-				return nil, domain.ErrRespTmp{
-					URL:        resp.Request.URL.String(),
-					Method:     resp.Request.Method,
-					StatusCode: resp.StatusCode,
-				}
-			}
-
-			// Check if the response status is OK
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("unexpected status code from task-service: %s", resp.Status)
-			}
-
-			// Store the response for further processing
-			taskResp = resp
-			return resp, nil
-		})
-
-		// If an error occurred, return it for retrying
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return err
-		}
-		return nil
+		return ph.attemptTaskRequest(ctx, taskReq, c, circuitBreaker, &taskResp)
 	})
 
-	// If the retries failed, log the error and return false
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		ph.logger.Printf("Error during task-service request after retries: %v", err)
-		return false
+		return ph.handleError(span, "Error during task-service request after retries", err)
 	}
 
-	// Ensure the response body is closed once we're done processing it
 	defer taskResp.Body.Close()
 
-	// Decode the task response body
-	var tasks []Task
-	if err := json.NewDecoder(taskResp.Body).Decode(&tasks); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		ph.logger.Println("Failed to decode task-service response:", err)
-		return false
+	tasks, err := ph.decodeTaskResponse(taskResp)
+	if err != nil {
+		return ph.handleError(span, "Failed to decode task-service response", err)
 	}
 
-	// Check if the user is associated with any pending or in-progress tasks
+	return ph.checkUserTasks(tasks, userID, span)
+}
+
+func (ph *ProjectsHandler) createTaskRequest(ctx context.Context, projectID string, authTokenCookie *http.Cookie) (*http.Request, error) {
+	taskServiceURL := fmt.Sprintf("https://task-server:8080/tasks/%s", projectID)
+	taskReq, err := http.NewRequestWithContext(ctx, "GET", taskServiceURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(taskReq.Header))
+	taskReq.Header.Set(contentType, appJson)
+	taskReq.AddCookie(authTokenCookie)
+	return taskReq, nil
+}
+
+func (ph *ProjectsHandler) createCircuitBreakerForTaskService() *gobreaker.CircuitBreaker {
+	return gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "TaskServiceCircuitBreaker",
+		MaxRequests: 5,
+		Timeout:     5 * time.Second,
+		Interval:    0,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures > 2
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			ph.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'", name, from, to)
+		},
+		IsSuccessful: func(err error) bool {
+			if err == nil {
+				return true
+			}
+			_, ok := err.(domain.ErrRespTmp)
+			return !ok
+		},
+	})
+}
+
+func (ph *ProjectsHandler) createRetrier() *retrier.Retrier {
+	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
+	return retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
+}
+
+func (ph *ProjectsHandler) attemptTaskRequest(ctx context.Context, taskReq *http.Request, client *http.Client, circuitBreaker *gobreaker.CircuitBreaker, resp **http.Response) error {
+	_, err := circuitBreaker.Execute(func() (interface{}, error) {
+		response, err := client.Do(taskReq)
+		if err != nil {
+			return nil, err
+		}
+
+		if response.StatusCode == http.StatusServiceUnavailable || response.StatusCode == http.StatusGatewayTimeout {
+			return nil, domain.ErrRespTmp{
+				URL:        response.Request.URL.String(),
+				Method:     response.Request.Method,
+				StatusCode: response.StatusCode,
+			}
+		}
+
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("unexpected status code from task-service: %s", response.Status)
+		}
+
+		*resp = response
+		return response, nil
+	})
+
+	return err
+}
+
+func (ph *ProjectsHandler) decodeTaskResponse(resp *http.Response) ([]Task, error) {
+	var tasks []Task
+	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (ph *ProjectsHandler) checkUserTasks(tasks []Task, userID string, span trace.Span) bool {
 	for _, task := range tasks {
 		if task.Status == "Pending" || task.Status == "InProgress" {
 			for _, id := range task.UserIDs {
 				if id == userID {
-					span.SetStatus(codes.Ok, "User is assigned to a task")
+					span.SetStatus(codes.Ok, "User  is assigned to a task")
 					return true
 				}
 			}
 		}
 	}
-
-	// No matching task found for the user
 	span.SetStatus(codes.Ok, "No tasks found for the user")
+	return false
+}
+
+func (ph *ProjectsHandler) handleError(span trace.Span, message string, err error) bool {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	ph.logger.Printf("%s: %v", message, err)
 	return false
 }
 
@@ -1365,7 +1380,7 @@ func (p *ProjectsHandler) CheckIfUserIsManager(rw http.ResponseWriter, h *http.R
 	if !ok {
 		span.RecordError(errors.New("User not found in context"))
 		span.SetStatus(codes.Error, "User not found in context")
-		http.Error(rw, "User ID not found in context", http.StatusUnauthorized)
+		http.Error(rw, userCtxErr, http.StatusUnauthorized)
 		return
 	}
 
@@ -1386,7 +1401,7 @@ func (p *ProjectsHandler) CheckIfUserIsManager(rw http.ResponseWriter, h *http.R
 		return
 	}
 
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusOK)
 	if isManager {
 		_, _ = rw.Write([]byte("true"))
@@ -1403,8 +1418,8 @@ func (p *ProjectsHandler) sendNotification(ctx context.Context, subject string, 
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		log.Println("Error connecting to NATS:", err)
-		p.logger.Println("Error connecting to NATS:", err)
+		log.Println(natsErr, err)
+		p.logger.Println(natsErr, err)
 		p.custLogger.Error(logrus.Fields{
 			"error": err.Error(),
 		}, "Failed to connect to NATS")
@@ -1453,15 +1468,15 @@ func (p *ProjectsHandler) GetProjectDetailsById(rw http.ResponseWriter, h *http.
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		p.logger.Print("Database exception: ", err)
+		p.logger.Print(fmt.Sprintf(databaseErr, err.Error()))
 		http.Error(rw, "Error fetching project details", http.StatusInternalServerError)
 		return
 	}
 
 	// If project is not found, return an error
 	if project == nil {
-		span.SetStatus(codes.Error, "Project not found")
-		span.SetStatus(codes.Error, "Project not found")
+		span.SetStatus(codes.Error, projectNotFound)
+		span.SetStatus(codes.Error, projectNotFound)
 		http.Error(rw, "Project with given id not found", http.StatusNotFound)
 		p.logger.Printf("Project with id: '%s' not found", id)
 		return
@@ -1503,8 +1518,8 @@ func (p *ProjectsHandler) GetProjectDetailsById(rw http.ResponseWriter, h *http.
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		p.logger.Fatal("Unable to convert to json:", err)
+		http.Error(rw, jsonErr, http.StatusInternalServerError)
+		p.logger.Fatal(jsonErr, err)
 		return
 	}
 	span.SetStatus(codes.Ok, "")

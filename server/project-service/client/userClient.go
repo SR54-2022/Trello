@@ -20,6 +20,11 @@ type UserClient struct {
 	address string
 }
 
+const (
+	appJson     = "application/json"
+	contentType = "Content-Type"
+)
+
 func NewUserClient(host, port string) UserClient {
 
 	return UserClient{
@@ -35,7 +40,7 @@ func (client UserClient) GetById(id string) (*UserDetails, error) {
 		log.Println(err)
 		return nil, errors.New("error while getting user details")
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(contentType, appJson)
 
 	clientUser, err := createTLSClient()
 	res, err := clientUser.Do(httpReq)
@@ -101,7 +106,7 @@ func (client UserClient) GetByIds(ids []string) ([]*UserDetails, error) {
 		log.Printf("Error creating HTTP request: %v", err)
 		return nil, errors.New("error while creating the request")
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(contentType, appJson)
 	otel.GetTextMapPropagator().Inject(context.Background(), propagation.HeaderCarrier(httpReq.Header))
 	// Send the request
 	//res, err := http.DefaultClient.Do(httpReq)
@@ -152,7 +157,7 @@ func (client UserClient) GetByIdsWithCookies(ids []string, cookie *http.Cookie) 
 	bodyReader := bytes.NewReader(reqBytes)
 	requestURL := client.address + "/users/details"
 	httpReq, err := http.NewRequest(http.MethodPost, requestURL, bodyReader)
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(contentType, appJson)
 
 	if err != nil {
 		log.Printf("Error creating HTTP request: %v", err)

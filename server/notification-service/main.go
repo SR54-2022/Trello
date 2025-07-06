@@ -24,6 +24,10 @@ import (
 func main() {
 	fmt.Println("Hello from notification-service")
 
+	const (
+		notifId = "/notifications/{id}"
+	)
+
 	config := loadConfig()
 	logger := log.New(os.Stdout, "NOTIFICATION-SERVICE: ", log.LstdFlags)
 
@@ -68,10 +72,10 @@ func main() {
 
 	r.Handle("/notifications/unread-count", notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.GetUnreadNotificationCount)))).Methods("GET")
 	r.Handle("/notifications", notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.CreateNotification)))).Methods("POST")
-	r.Handle("/notifications/{id}", notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.GetNotificationByID)))).Methods("GET")
+	r.Handle(notifId, notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.GetNotificationByID)))).Methods("GET")
 	r.Handle("/notifications", notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.GetNotificationsByUserID))))
-	r.Handle("/notifications/{id}", notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.UpdateNotificationStatus)))).Methods("PUT")
-	r.Handle("/notifications/{id}", notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.DeleteNotification)))).Methods("DELETE")
+	r.Handle(notifId, notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.UpdateNotificationStatus)))).Methods("PUT")
+	r.Handle(notifId, notificationHandler.MiddlewareExtractUserFromCookie(notificationHandler.MiddlewareCheckRoles([]string{"member"}, http.HandlerFunc(notificationHandler.DeleteNotification)))).Methods("DELETE")
 
 	corsHandler := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},

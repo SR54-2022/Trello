@@ -23,13 +23,25 @@ import (
 	"notification-service/model"
 	"notification-service/repository"
 	"os"
-	"strconv"
+
 	"strings"
 	"time"
 )
 
 type KeyProduct struct{} // Context key for storing user data
 type KeyRole struct{}
+
+const (
+	appJson           = "application/json"
+	conType           = "Content-Type"
+	notificationError = "Error inserting notification: "
+	jsonNotEnabled    = "Unable to convert to json"
+	encodeError       = "Unable to encode response: %s"
+	invalidUUID       = "Invalid UUID format: %s"
+	userCtxErr        = "User ID not found in context"
+	userCtxExtracted  = "User ID extracted from context: %s"
+	getNotifErr       = "Error fetching notifications: %s"
+)
 
 type NotificationHandler struct {
 	logger     *log.Logger
@@ -84,99 +96,30 @@ func ExtractTraceInfoMiddleware(next http.Handler) http.Handler {
 }
 
 func (n *NotificationHandler) verifyTokenWithUserService(ctx context.Context, token string) (string, string, error) {
-	ctx, span := n.tracer.Start(ctx, "NotificationHandler.verifyTokenWithUserService")
+	ctx, span := n.tracer.Start(ctx, "NotificationHandler.verifyTokenWithUser Service")
 	defer span.End()
-	linkToUserService := os.Getenv("LINK_TO_USER_SERVICE")
-	userServiceURL := fmt.Sprintf("%s/validate-token", linkToUserService)
-	reqBody := fmt.Sprintf(`{"token": "%s"}`, token)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", userServiceURL, strings.NewReader(reqBody))
+	userServiceURL, err := n.getUserServiceURL()
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		n.logger.Printf("Failed to create token validation request: %v", err)
 		return "", "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+
+	req, err := n.createRequest(ctx, userServiceURL, token)
+	if err != nil {
+		return "", "", err
+	}
+
 	client, err := createTLSClient()
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		n.logger.Printf("Error creating TLS client: %v", err)
-		return "", "", err
+		return "", "", n.recordError(span, "Error creating TLS client", err)
 	}
 
-	circuitBreaker := gobreaker.NewCircuitBreaker(
-		gobreaker.Settings{
-			Name:        "UserServiceCircuitBreaker",
-			MaxRequests: 5,
-			Timeout:     5 * time.Second,
-			Interval:    0,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				return counts.ConsecutiveFailures > 2
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				n.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
-			},
-			IsSuccessful: func(err error) bool {
-				if err == nil {
-					return true
-				}
-				if _, ok := err.(domain.ErrRespTmp); ok {
-					return false
-				}
-				return false
-			},
-		},
-	)
-
-	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
-	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
-
-	var timeout time.Duration
-	deadline, reqHasDeadline := ctx.Deadline()
+	circuitBreaker := n.createCircuitBreaker()
+	r := n.createRetrier()
 
 	var resp *http.Response
-	retryCount := 0
-
 	err = r.RunCtx(ctx, func(ctx context.Context) error {
-		retryCount++
-		n.logger.Printf("Attempting user-service request, attempt #%d", retryCount)
-
-		if reqHasDeadline {
-			timeout = time.Until(deadline)
-		}
-
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			if timeout > 0 {
-				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
-			}
-
-			resp, err = client.Do(req)
-			if err != nil {
-				return nil, err
-			}
-
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-				return nil, domain.ErrRespTmp{
-					URL:        resp.Request.URL.String(),
-					Method:     resp.Request.Method,
-					StatusCode: resp.StatusCode,
-				}
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("unexpected status code from user-service: %s", resp.Status)
-			}
-
-			return resp, nil
-		})
-
-		if err != nil {
-			return err
-		}
-		return nil
+		return n.attemptRequest(ctx, req, client, circuitBreaker, &resp)
 	})
 
 	if err != nil {
@@ -190,16 +133,90 @@ func (n *NotificationHandler) verifyTokenWithUserService(ctx context.Context, to
 		n.logger.Println("Received nil response from user service")
 		return "", "", fmt.Errorf("received nil response from user service")
 	}
-
 	defer resp.Body.Close()
 
+	return n.handleResponse(resp, span)
+}
+
+func (n *NotificationHandler) getUserServiceURL() (string, error) {
+	linkToUserService := os.Getenv("LINK_TO_USER_SERVICE")
+	return fmt.Sprintf("%s/validate-token", linkToUserService), nil
+}
+
+func (n *NotificationHandler) createRequest(ctx context.Context, userServiceURL, token string) (*http.Request, error) {
+	reqBody := fmt.Sprintf(`{"token": "%s"}`, token)
+	req, err := http.NewRequestWithContext(ctx, "POST", userServiceURL, strings.NewReader(reqBody))
+	if err != nil {
+		n.logger.Printf("Failed to create token validation request: %v", err)
+		return nil, err
+	}
+	req.Header.Set(conType, appJson)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	return req, nil
+}
+
+func (n *NotificationHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
+	return gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "User ServiceCircuitBreaker",
+		MaxRequests: 5,
+		Timeout:     5 * time.Second,
+		Interval:    0,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures > 2
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			n.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
+		},
+		IsSuccessful: func(err error) bool {
+			if err == nil {
+				return true
+			}
+			_, ok := err.(domain.ErrRespTmp)
+			return !ok
+		},
+	})
+}
+
+func (n *NotificationHandler) createRetrier() *retrier.Retrier {
+	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
+	return retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
+}
+
+func (n *NotificationHandler) attemptRequest(ctx context.Context, req *http.Request, client *http.Client, circuitBreaker *gobreaker.CircuitBreaker, resp **http.Response) error {
+	n.logger.Printf("Attempting user-service request")
+
+	_, err := circuitBreaker.Execute(func() (interface{}, error) {
+		response, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		if response.StatusCode == http.StatusServiceUnavailable || response.StatusCode == http.StatusGatewayTimeout {
+			return nil, domain.ErrRespTmp{
+				URL:        response.Request.URL.String(),
+				Method:     response.Request.Method,
+				StatusCode: response.StatusCode,
+			}
+		}
+
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("unexpected status code from user-service: %s", response.Status)
+		}
+
+		*resp = response
+		return response, nil
+	})
+
+	return err
+}
+
+func (n *NotificationHandler) handleResponse(resp *http.Response, span trace.Span) (string, string, error) {
 	var result struct {
 		UserID string `json:"user_id"`
 		Role   string `json:"role"`
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		n.logger.Printf("Error decoding response: %v", err)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -207,9 +224,15 @@ func (n *NotificationHandler) verifyTokenWithUserService(ctx context.Context, to
 	}
 
 	n.logger.Printf("ROLE IS %s", result.Role)
-
 	span.SetStatus(codes.Ok, "Successfully validated token")
 	return result.UserID, result.Role, nil
+}
+
+func (n *NotificationHandler) recordError(span trace.Span, message string, err error) error {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	n.logger.Printf("%s: %v", message, err)
+	return err
 }
 
 func createTLSClient() (*http.Client, error) {
@@ -274,20 +297,20 @@ func (n *NotificationHandler) CreateNotification(rw http.ResponseWriter, h *http
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		http.Error(rw, "Failed to create notification", http.StatusInternalServerError)
-		n.logger.Print("Error inserting notification:", err)
+		n.logger.Print(notificationError, err)
 		return
 	}
 	n.custLogger.Info(nil, "Notification successfully created in repository")
 
 	rw.WriteHeader(http.StatusCreated)
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(conType, appJson)
 	err = json.NewEncoder(rw).Encode(notification)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, "Unable to encode response: "+err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		n.logger.Fatal("Unable to encode response:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(encodeError, err.Error()))
+		http.Error(rw, jsonNotEnabled, http.StatusInternalServerError)
+		n.logger.Fatal(fmt.Sprintf(encodeError, err.Error()))
 	}
 	span.SetStatus(codes.Ok, "Successfully created notification")
 	n.custLogger.Info(nil, "CreateNotification request completed successfully")
@@ -304,9 +327,9 @@ func (n *NotificationHandler) GetNotificationByID(rw http.ResponseWriter, h *htt
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, "Invalid UUID format: "+err.Error())
-		http.Error(rw, "Invalid UUID format", http.StatusBadRequest)
-		n.logger.Println("Invalid UUID format:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(invalidUUID, err.Error()))
+		http.Error(rw, invalidUUID, http.StatusBadRequest)
+		n.logger.Println(fmt.Sprintf(invalidUUID, err.Error()))
 		return
 	}
 
@@ -320,14 +343,14 @@ func (n *NotificationHandler) GetNotificationByID(rw http.ResponseWriter, h *htt
 		return
 	}
 
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(conType, appJson)
 	err = json.NewEncoder(rw).Encode(notification)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, "Unable to encode response: "+err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		n.logger.Fatal("Unable to encode response:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(encodeError, err.Error()))
+		http.Error(rw, jsonNotEnabled, http.StatusInternalServerError)
+		n.logger.Fatal(fmt.Sprintf(encodeError, err.Error()))
 	}
 	n.custLogger.Info(nil, "GetNotificationByID request completed successfully")
 	span.SetStatus(codes.Ok, "Successfully fetched notification")
@@ -339,39 +362,39 @@ func (n *NotificationHandler) GetNotificationsByUserID(rw http.ResponseWriter, h
 	defer span.End()
 	userID, ok := h.Context().Value(KeyProduct{}).(string)
 	if !ok {
-		errMsg := "User ID not found in context"
+
 		span.RecordError(errors.New("Missing user id"))
 		span.SetStatus(codes.Error, "Missing user id")
-		n.custLogger.Error(nil, errMsg)
-		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		n.logger.Println("User ID not found in context")
+		n.custLogger.Error(nil, userCtxErr)
+		http.Error(rw, userCtxErr, http.StatusUnauthorized)
+		n.logger.Println(userCtxErr)
 		return
 	}
-	n.custLogger.Info(nil, "User ID extracted from context: "+userID)
+	n.custLogger.Info(nil, fmt.Sprintf(userCtxExtracted, userID))
 
 	n.logger.Println("User ID:", userID)
 
 	notifications, err := n.repo.GetByUserID(ctx, userID)
 	if err != nil {
-		errMsg := "Error fetching notifications"
+
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, errMsg+": "+err.Error())
-		http.Error(rw, "Error fetching notifications", http.StatusInternalServerError)
-		n.logger.Println("Error fetching notifications:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(getNotifErr, err.Error()))
+		http.Error(rw, getNotifErr, http.StatusInternalServerError)
+		n.logger.Println(fmt.Sprintf(getNotifErr, err.Error()))
 		return
 	}
 	n.custLogger.Info(nil, fmt.Sprintf("Fetched %d notifications for user ID: %s", len(notifications), userID))
 
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(conType, appJson)
 	err = json.NewEncoder(rw).Encode(notifications)
 	if err != nil {
-		errMsg := "Unable to encode response"
+
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, errMsg+": "+err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		n.logger.Fatal("Unable to encode response:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(encodeError, err.Error()))
+		http.Error(rw, jsonNotEnabled, http.StatusInternalServerError)
+		n.logger.Fatal(fmt.Sprintf(encodeError, err.Error()))
 	}
 	span.SetStatus(codes.Ok, "Successfully got notifications")
 	n.custLogger.Info(nil, "GetNotificationsByUserID request completed successfully")
@@ -386,12 +409,12 @@ func (n *NotificationHandler) UpdateNotificationStatus(rw http.ResponseWriter, h
 
 	notificationID, err := gocql.ParseUUID(id)
 	if err != nil {
-		errMsg := "Invalid UUID format"
+
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, errMsg+": "+err.Error())
-		http.Error(rw, "Invalid UUID format", http.StatusBadRequest)
-		n.logger.Println("Invalid UUID format:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(invalidUUID, err.Error()))
+		http.Error(rw, invalidUUID, http.StatusBadRequest)
+		n.logger.Println(fmt.Sprintf(invalidUUID, err.Error()))
 		return
 	}
 
@@ -426,15 +449,15 @@ func (n *NotificationHandler) UpdateNotificationStatus(rw http.ResponseWriter, h
 
 	userID, ok := h.Context().Value(KeyProduct{}).(string)
 	if !ok {
-		errMsg := "User ID not found in context"
+
 		span.RecordError(errors.New("Could not find user id"))
 		span.SetStatus(codes.Error, "Could not find user id")
-		n.logger.Println("User id not found in context")
-		n.custLogger.Error(nil, errMsg)
-		http.Error(rw, "User id not found in context", http.StatusUnauthorized)
+		n.logger.Println(userCtxErr)
+		n.custLogger.Error(nil, userCtxErr)
+		http.Error(rw, userCtxErr, http.StatusUnauthorized)
 		return
 	}
-	n.custLogger.Info(nil, "User ID extracted from context: "+userID)
+	n.custLogger.Info(nil, fmt.Sprintf(userCtxExtracted, userID))
 
 	err = n.repo.UpdateStatus(ctx, req.CreatedAt, userID, notificationID, req.Status)
 	if err != nil {
@@ -463,12 +486,12 @@ func (n *NotificationHandler) DeleteNotification(rw http.ResponseWriter, h *http
 
 	notificationID, err := gocql.ParseUUID(id)
 	if err != nil {
-		errMsg := "Invalid UUID format"
+
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.custLogger.Error(nil, errMsg+": "+err.Error())
-		http.Error(rw, "Invalid UUID format", http.StatusBadRequest)
-		n.logger.Println("Invalid UUID format:", err)
+		n.custLogger.Error(nil, fmt.Sprintf(invalidUUID, err.Error()))
+		http.Error(rw, invalidUUID, http.StatusBadRequest)
+		n.logger.Println(fmt.Sprintf(invalidUUID, err.Error()))
 		return
 	}
 
@@ -581,7 +604,7 @@ func (n *NotificationHandler) handleProjectJoined(ctx context.Context, msg *nats
 	if err := n.repo.Create(ctx, &notification); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.logger.Println("Error inserting notification:", err)
+		n.logger.Println(notificationError, err)
 	}
 	span.SetStatus(codes.Ok, message)
 }
@@ -610,7 +633,7 @@ func (n *NotificationHandler) handleTaskJoined(ctx context.Context, msg *nats.Ms
 	if err := n.repo.Create(ctx, &notification); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.logger.Println("Error inserting notification:", err)
+		n.logger.Println(notificationError, err)
 	}
 	span.SetStatus(codes.Ok, message)
 }
@@ -640,7 +663,7 @@ func (n *NotificationHandler) handleProjectRemoved(ctx context.Context, msg *nat
 	if err := n.repo.Create(ctx, &notification); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.logger.Println("Error inserting notification:", err)
+		n.logger.Println(notificationError, err)
 	}
 	span.SetStatus(codes.Ok, message)
 }
@@ -669,7 +692,7 @@ func (n *NotificationHandler) handleTaskRemoved(ctx context.Context, msg *nats.M
 	if err := n.repo.Create(ctx, &notification); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		n.logger.Println("Error inserting notification:", err)
+		n.logger.Println(notificationError, err)
 	}
 	span.SetStatus(codes.Ok, "")
 }
@@ -733,22 +756,22 @@ func (n *NotificationHandler) GetUnreadNotificationCount(rw http.ResponseWriter,
 	n.logger.Println("method hit")
 	userID, ok := h.Context().Value(KeyProduct{}).(string)
 	if !ok {
-		span.RecordError(errors.New("user id not found"))
-		span.SetStatus(codes.Error, "user id not found")
-		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		n.logger.Println("User ID not found in context")
+		span.RecordError(errors.New(userCtxErr))
+		span.SetStatus(codes.Error, userCtxErr)
+		http.Error(rw, userCtxErr, http.StatusUnauthorized)
+		n.logger.Println(userCtxErr)
 		return
 	}
-	n.custLogger.Info(nil, "User ID extracted from context: "+userID)
+	n.custLogger.Info(nil, fmt.Sprintf(userCtxExtracted, userID))
 
 	notifications, err := n.repo.GetByUserID(ctx, userID)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		errMsg := "Error fetching notifications"
-		n.custLogger.Error(nil, errMsg+": "+err.Error())
-		http.Error(rw, "Error fetching notifications", http.StatusInternalServerError)
-		n.logger.Println("Error fetching notifications:", err)
+
+		n.custLogger.Error(nil, fmt.Sprintf(getNotifErr, err.Error()))
+		http.Error(rw, getNotifErr, http.StatusInternalServerError)
+		n.logger.Println(fmt.Sprintf(getNotifErr, err.Error()))
 		return
 	}
 	n.custLogger.Info(nil, fmt.Sprintf("Fetched %d notifications for user ID: %s", len(notifications), userID))
@@ -761,17 +784,17 @@ func (n *NotificationHandler) GetUnreadNotificationCount(rw http.ResponseWriter,
 	}
 	n.custLogger.Info(nil, fmt.Sprintf("Unread notifications count: %d", unreadCount))
 
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(conType, appJson)
 	err = json.NewEncoder(rw).Encode(struct {
 		UnreadCount int `json:"unreadCount"`
 	}{UnreadCount: unreadCount})
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		n.logger.Fatal("Unable to encode response:", err)
-		errMsg := "Unable to encode response"
-		n.custLogger.Error(nil, errMsg+": "+err.Error())
+		n.custLogger.Error(nil, fmt.Sprintf(encodeError, err.Error()))
+		http.Error(rw, jsonNotEnabled, http.StatusInternalServerError)
+		n.logger.Fatal(fmt.Sprintf(encodeError, err.Error()))
+
 	}
 	span.SetStatus(codes.Ok, "")
 	n.custLogger.Info(nil, "GetUnreadNotificationCount request completed successfully")

@@ -103,26 +103,44 @@ export class AddTaskComponent implements OnInit {
       });
   }
 
+
   fetchTasks(projectId: string) {
     this.tasks = [];
     this.http.get<Task[]>(`/api/task-server/tasks/${projectId}`)
       .subscribe({
-        next: (response) => {
-          this.tasks = response.reverse();
-          this.tasks.forEach(task => {
-            this.tempStatusMap[task.id] = task.status as TaskStatus;
-            this.taskMembers[task.id] = task.user_ids.map(userId =>
-              this.allUsers.find(user => user.id === userId)
-            ).filter(user => user !== undefined) as User[];
-            this.filteredUsers[task.id] = this.allUsers.filter(user =>
-              !this.taskMembers[task.id].some(member => member.id === user.id))
-          });
-          console.log('Data fetched successfully:', this.tasks);
-        },
-        error: (error) => {
-          console.error('Error fetching data:', error);
-        }
-      });
+        next: (response) => this.handleFetchResponse(response),
+        error: (error) => this.handleFetchError(error)
+      })
+  }
+
+  private handleFetchResponse(response: Task[]) {
+    this.tasks = response.reverse();
+    this.tasks.forEach(task => {
+      this.updateTaskMembers(task);
+      this.updateFilteredUsers(task);
+    });
+    console.log("Successfully fetching tasks.");
+  }
+
+  private handleFetchError(error: any) {
+    console.error("Error fetching data ",error);
+  }
+
+  private updateTaskMembers(task: Task) {
+    this.tempStatusMap[task.id] = task.status as TaskStatus;
+    this.taskMembers[task.id] = task.user_ids.map(userId =>
+      this.findUserById(userId)).filter(user => user !== undefined) as User[];
+
+  }
+
+  private updateFilteredUsers(task: Task) {
+    this.filteredUsers[task.id] = this.allUsers.filter(user =>
+      !this.taskMembers[task.id].some(member => member.id === user.id)
+    );
+  }
+
+  private findUserById(userId: string): User | undefined {
+    return this.allUsers.find(user => user.id == userId);
   }
 
   onSubmit(): void {
@@ -282,4 +300,6 @@ export class AddTaskComponent implements OnInit {
     });
 
   }
+
+
 }

@@ -27,6 +27,10 @@ type EventHandler struct {
 	custLogger *customLogger.Logger
 }
 
+const (
+	failedProcessEvent = "failed to process the event"
+)
+
 // NewEventHandler creates a new EventHandler with a given repository.
 func NewEventHandler(repo *repository.ESDBClient, tracer trace.Tracer, logger *log.Logger) *EventHandler {
 	return &EventHandler{repo: repo, tracer: tracer, logger: logger}
@@ -55,7 +59,7 @@ func (h *EventHandler) ProcessEventHandler(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(w, "Failed to process event", http.StatusInternalServerError)
+		http.Error(w, failedProcessEvent, http.StatusInternalServerError)
 		return
 	}
 
@@ -64,8 +68,8 @@ func (h *EventHandler) ProcessEventHandler(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(message))
 	} else {
-		span.RecordError(errors.New("Failed to process event"))
-		span.SetStatus(codes.Error, "Failed to process event")
+		span.RecordError(errors.New(failedProcessEvent))
+		span.SetStatus(codes.Error, failedProcessEvent)
 		http.Error(w, "Event type not handled", http.StatusBadRequest)
 	}
 }
@@ -106,305 +110,181 @@ func (h *EventHandler) GetEventsHandler(w http.ResponseWriter, r *http.Request) 
 func (h *EventHandler) processEvent(ctx context.Context, event model.Event) (string, error) {
 	ctx, span := h.tracer.Start(ctx, "EventHandler.processEvent")
 	defer span.End()
+
+	if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
+		return h.handleError(span, "Failed to store event", err)
+	}
+
 	var message string
+	var subject string
+	var message4nats interface{}
+
 	switch event.Type {
 	case model.ProjectCreatedType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully created a project"
-
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var projectCreatedEvent model.ProjectCreatedEvent
-		if err := json.Unmarshal(eventJSON, &projectCreatedEvent); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to ProjectCreatedEvent: %v", err)
-			return "", err
-		}
-
-		subject := "project.created"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			EndDate   string `json:"endDate"`
-		}{
-			ProjectID: event.ProjectID,
-			EndDate:   projectCreatedEvent.EndDate,
-		}
-
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
+		subject = "project.created"
+		message4nats = h.createProjectCreatedMessage(event)
 
 	case model.MemberAddedType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully added member to project"
+		subject = "member.added"
+		message4nats = h.createMemberAddedMessage(event)
 
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var memberAddedProjectEvent model.MemberAddedToProjectEvent
-		if err := json.Unmarshal(eventJSON, &memberAddedProjectEvent); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to MemberAddedProjectEvent: %v", err)
-			return "", err
-		}
-
-		subject := "member.added"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			MemberID  string `json:"memberId"`
-		}{
-			ProjectID: event.ProjectID,
-			MemberID:  memberAddedProjectEvent.MemberID,
-		}
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
 	case model.MemberRemovedType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully removed member from project"
+		subject = "member.removed"
+		message4nats = h.createMemberRemovedMessage(event)
 
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var memberRemovedProjectEvent model.MemberRemovedFromProjectEvent
-		if err := json.Unmarshal(eventJSON, &memberRemovedProjectEvent); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to MemberRemovedProjectEvent: %v", err)
-			return "", err
-		}
-
-		subject := "member.removed"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			MemberID  string `json:"memberId"`
-		}{
-			ProjectID: event.ProjectID,
-			MemberID:  memberRemovedProjectEvent.MemberID,
-		}
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
 	case model.MemberAddedTaskType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully added member to task"
+		subject = "member.task.added"
+		message4nats = h.createMemberAddedTaskMessage(event)
 
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var memberAddedTaskEvent model.MemberAddedToTaskEvent
-		if err := json.Unmarshal(eventJSON, &memberAddedTaskEvent); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to MemberAddedTaskEvent: %v", err)
-			return "", err
-		}
-
-		subject := "member.task.added"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			TaskID    string `json:"taskId"`
-			MemberID  string `json:"memberId"`
-		}{
-			ProjectID: event.ProjectID,
-			TaskID:    memberAddedTaskEvent.TaskID,
-			MemberID:  memberAddedTaskEvent.MemberID,
-		}
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
 	case model.MemberRemovedTaskType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully removed member from task"
+		subject = "member.task.removed"
+		message4nats = h.createMemberRemovedTaskMessage(event)
 
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var memberRemovedTaskEvent model.MemberRemovedFromTaskEvent
-		if err := json.Unmarshal(eventJSON, &memberRemovedTaskEvent); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to MemberRemovedTaskEvent: %v", err)
-			return "", err
-		}
-
-		subject := "member.task.removed"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			TaskID    string `json:"taskId"`
-			MemberID  string `json:"memberId"`
-		}{
-			ProjectID: event.ProjectID,
-			TaskID:    memberRemovedTaskEvent.TaskID,
-			MemberID:  memberRemovedTaskEvent.MemberID,
-		}
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
 	case model.TaskCreatedType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully created task"
+		subject = "task.created"
+		message4nats = h.createTaskCreatedMessage(event)
 
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var taskCreated model.TaskCreatedEvent
-		if err := json.Unmarshal(eventJSON, &taskCreated); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to TaskCreated: %v", err)
-			return "", err
-		}
-
-		subject := "task.created"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			TaskID    string `json:"taskId"`
-		}{
-			ProjectID: event.ProjectID,
-			TaskID:    taskCreated.TaskID,
-		}
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
 	case model.TaskStatusChangedType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully changed task status"
+		subject = "task.status.change"
+		message4nats = h.createTaskStatusChangedMessage(event)
 
-		eventJSON, err := json.Marshal(event.Event)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to marshal event: %v", err)
-			return "", err
-		}
-
-		var taskStatusChanged model.TaskStatusChangedEvent
-		if err := json.Unmarshal(eventJSON, &taskStatusChanged); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to unmarshal event to TaskStatusChanged: %v", err)
-			return "", err
-		}
-
-		subject := "task.status.change"
-		message4nats := struct {
-			ProjectID string `json:"projectId"`
-			TaskID    string `json:"taskId"`
-			Status    string `json:"status"`
-		}{
-			ProjectID: event.ProjectID,
-			TaskID:    taskStatusChanged.TaskID,
-			Status:    taskStatusChanged.Status,
-		}
-		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to send notification: %v", err)
-			return "", err
-		}
 	case model.DocumentAddedType:
-		if err := h.repo.StoreEvent(ctx, event.ProjectID, event); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Printf("Failed to store event: %v", err)
-			return "", err
-		}
 		message = "Successfully added document"
+
 	default:
-		span.RecordError(errors.New("unhandled event type"))
-		span.SetStatus(codes.Error, "Unhandled event type")
-		log.Printf("Unhandled event type: %s\n", event.Type)
-		return "", nil
+		return h.handleError(span, "Unhandled event type", errors.New("unhandled event type"))
 	}
+
+	if message4nats != nil {
+		if err := h.sendNotification(ctx, subject, message4nats); err != nil {
+			return h.handleError(span, "Failed to send notification", err)
+		}
+	}
+
 	span.SetStatus(codes.Ok, "")
 	return message, nil
+}
+
+func (h *EventHandler) handleError(span trace.Span, logMessage string, err error) (string, error) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	log.Printf("%s: %v", logMessage, err)
+	return "", err
+}
+
+func (h *EventHandler) createProjectCreatedMessage(event model.Event) interface{} {
+	var projectCreatedEvent model.ProjectCreatedEvent
+	h.unmarshalEvent(event, &projectCreatedEvent)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		EndDate   string `json:"endDate"`
+	}{
+		ProjectID: event.ProjectID,
+		EndDate:   projectCreatedEvent.EndDate,
+	}
+}
+
+func (h *EventHandler) createMemberAddedMessage(event model.Event) interface{} {
+	var memberAddedProjectEvent model.MemberAddedToProjectEvent
+	h.unmarshalEvent(event, &memberAddedProjectEvent)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		MemberID  string `json:"memberId"`
+	}{
+		ProjectID: event.ProjectID,
+		MemberID:  memberAddedProjectEvent.MemberID,
+	}
+}
+
+func (h *EventHandler) createMemberRemovedMessage(event model.Event) interface{} {
+	var memberRemovedProjectEvent model.MemberRemovedFromProjectEvent
+	h.unmarshalEvent(event, &memberRemovedProjectEvent)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		MemberID  string `json:"memberId"`
+	}{
+		ProjectID: event.ProjectID,
+		MemberID:  memberRemovedProjectEvent.MemberID,
+	}
+}
+
+func (h *EventHandler) createMemberAddedTaskMessage(event model.Event) interface{} {
+	var memberAddedTaskEvent model.MemberAddedToTaskEvent
+	h.unmarshalEvent(event, &memberAddedTaskEvent)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		TaskID    string `json:"taskId"`
+		MemberID  string `json:"memberId"`
+	}{
+		ProjectID: event.ProjectID,
+		TaskID:    memberAddedTaskEvent.TaskID,
+		MemberID:  memberAddedTaskEvent.MemberID,
+	}
+}
+
+func (h *EventHandler) createMemberRemovedTaskMessage(event model.Event) interface{} {
+	var memberRemovedTaskEvent model.MemberRemovedFromTaskEvent
+	h.unmarshalEvent(event, &memberRemovedTaskEvent)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		TaskID    string `json:"taskId"`
+		MemberID  string `json:"memberId"`
+	}{
+		ProjectID: event.ProjectID,
+		TaskID:    memberRemovedTaskEvent.TaskID,
+		MemberID:  memberRemovedTaskEvent.MemberID,
+	}
+}
+
+func (h *EventHandler) createTaskCreatedMessage(event model.Event) interface{} {
+	var taskCreated model.TaskCreatedEvent
+	h.unmarshalEvent(event, &taskCreated)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		TaskID    string `json:"taskId"`
+	}{
+		ProjectID: event.ProjectID,
+		TaskID:    taskCreated.TaskID,
+	}
+}
+
+func (h *EventHandler) createTaskStatusChangedMessage(event model.Event) interface{} {
+	var taskStatusChanged model.TaskStatusChangedEvent
+	h.unmarshalEvent(event, &taskStatusChanged)
+
+	return struct {
+		ProjectID string `json:"projectId"`
+		TaskID    string `json:"taskId"`
+		Status    string `json:"status"`
+	}{
+		ProjectID: event.ProjectID,
+		TaskID:    taskStatusChanged.TaskID,
+		Status:    taskStatusChanged.Status,
+	}
+}
+
+func (h *EventHandler) unmarshalEvent(event model.Event, target interface{}) {
+	eventJSON, err := json.Marshal(event.Event)
+	if err != nil {
+		log.Printf("Failed to marshal event: %v", err)
+		return
+	}
+	if err := json.Unmarshal(eventJSON, target); err != nil {
+		log.Printf("Failed to unmarshal event: %v", err)
+	}
 }
 
 func (p *EventHandler) sendNotification(ctx context.Context, subject string, message interface{}) error {
