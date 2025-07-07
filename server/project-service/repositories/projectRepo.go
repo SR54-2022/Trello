@@ -22,6 +22,12 @@ type ProjectRepo struct {
 	tracer trace.Tracer
 }
 
+const (
+	invalidUser    = "invalid user ID: %v"
+	invalidProject = "invalid project ID: %v"
+	removeFail     = "failed to remove user from project: %v"
+)
+
 func New(ctx context.Context, logger *log.Logger, tracer trace.Tracer) (*ProjectRepo, error) {
 	dburi := os.Getenv("MONGO_DB_URI")
 	if dburi == "" {
@@ -132,7 +138,7 @@ func (pr *ProjectRepo) GetAllByMember(ctx context.Context, userID string) (model
 
 	objID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %v", err)
+		return nil, fmt.Errorf(invalidUser, err)
 	}
 
 	filter := bson.M{"user_ids": objID, "pending_deletion": false}
@@ -209,7 +215,7 @@ func (pr *ProjectRepo) AddUsersToProject(ctx context.Context, projectId string, 
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("invalid project ID: %v", err)
+		return fmt.Errorf(invalidProject, err)
 	}
 
 	var objIDs []primitive.ObjectID
@@ -218,7 +224,7 @@ func (pr *ProjectRepo) AddUsersToProject(ctx context.Context, projectId string, 
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
-			return fmt.Errorf("invalid user ID: %v", err)
+			return fmt.Errorf(invalidUser, err)
 		}
 		objIDs = append(objIDs, objID)
 	}
@@ -247,14 +253,14 @@ func (pr *ProjectRepo) RemoveUserFromProject(ctx context.Context, projectId stri
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("invalid project ID: %v", err)
+		return fmt.Errorf(invalidProject, err)
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("invalid user ID: %v", err)
+		return fmt.Errorf(invalidUser, err)
 	}
 
 	_, err = collection.UpdateOne(
@@ -265,7 +271,7 @@ func (pr *ProjectRepo) RemoveUserFromProject(ctx context.Context, projectId stri
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("failed to remove user from project: %v", err)
+		return fmt.Errorf(removeFail, err)
 	}
 	span.SetStatus(codes.Ok, "Successfully removed user from project")
 	return nil
@@ -281,7 +287,7 @@ func (pr *ProjectRepo) DeleteProject(ctx context.Context, projectId string) erro
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("invalid project ID: %v", err)
+		return fmt.Errorf(invalidProject, err)
 	}
 
 	_, err = collection.DeleteOne(
@@ -291,7 +297,7 @@ func (pr *ProjectRepo) DeleteProject(ctx context.Context, projectId string) erro
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("failed to remove user from project: %v", err)
+		return fmt.Errorf(removeFail, err)
 	}
 	span.SetStatus(codes.Ok, "Successfully removed project")
 
@@ -306,7 +312,7 @@ func (pr *ProjectRepo) PendingDeletion(ctx context.Context, projectId string, to
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("invalid project ID: %v", err)
+		return fmt.Errorf(invalidProject, err)
 	}
 
 	_, err = collection.UpdateOne(
@@ -317,7 +323,7 @@ func (pr *ProjectRepo) PendingDeletion(ctx context.Context, projectId string, to
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("failed to remove user from project: %v", err)
+		return fmt.Errorf(removeFail, err)
 	}
 	span.SetStatus(codes.Ok, "Successfully removed pending deletion")
 	return nil
@@ -345,7 +351,7 @@ func (pr *ProjectRepo) IsUserManagerOfProject(ctx context.Context, userId string
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return false, fmt.Errorf("invalid user ID: %v", err)
+		return false, fmt.Errorf(invalidUser, err)
 	}
 
 	managerObjID, err := primitive.ObjectIDFromHex(project.Manager)

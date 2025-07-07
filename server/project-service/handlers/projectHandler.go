@@ -47,6 +47,8 @@ const (
 	userMax         = "Cannot add more users than the maximum limit"
 	userMin         = "Cannot add users to a project without meeting the minimum member requirement"
 	natsErr         = "Error connecting to NATS:"
+	roleNotFound    = "Role not found in context"
+	successfulFunc  = "Successful function"
 )
 
 var pendingProjectDeletion = make(map[string]map[string]bool)
@@ -1300,7 +1302,7 @@ func (uh *ProjectsHandler) MiddlewareCheckRoles(allowedRoles []string, next http
 		role, ok := h.Context().Value(KeyRole{}).(string)
 		if !ok {
 			http.Error(rw, "Forbidden", http.StatusForbidden)
-			uh.logger.Println("Role not found in context")
+			uh.logger.Println(roleNotFound)
 			return
 		}
 
@@ -1338,7 +1340,7 @@ func (p *ProjectsHandler) IsUserInProject(rw http.ResponseWriter, h *http.Reques
 		rw.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(rw).Encode(map[string]bool{"is_member": false})
 	}
-	span.SetStatus(codes.Ok, "Successful function")
+	span.SetStatus(codes.Ok, successfulFunc)
 }
 
 func (p *ProjectsHandler) isUserInProject(ctx context.Context, projectID, userID string) bool {
@@ -1352,7 +1354,7 @@ func (p *ProjectsHandler) isUserInProject(ctx context.Context, projectID, userID
 		return false
 	}
 
-	span.SetStatus(codes.Ok, "Successful function")
+	span.SetStatus(codes.Ok, successfulFunc)
 	return contains(project.UserIDs, userID)
 }
 
@@ -1370,9 +1372,9 @@ func (p *ProjectsHandler) CheckIfUserIsManager(rw http.ResponseWriter, h *http.R
 	defer span.End()
 	role, ok := h.Context().Value(KeyRole{}).(string)
 	if !ok {
-		span.RecordError(errors.New("Role not found in context"))
-		span.SetStatus(codes.Error, "Role not found in context")
-		http.Error(rw, "Role not found in context", http.StatusUnauthorized)
+		span.RecordError(errors.New(roleNotFound))
+		span.SetStatus(codes.Error, roleNotFound)
+		http.Error(rw, roleNotFound, http.StatusUnauthorized)
 		return
 	}
 
@@ -1408,7 +1410,7 @@ func (p *ProjectsHandler) CheckIfUserIsManager(rw http.ResponseWriter, h *http.R
 	} else {
 		_, _ = rw.Write([]byte("false"))
 	}
-	span.SetStatus(codes.Ok, "Successful function")
+	span.SetStatus(codes.Ok, successfulFunc)
 }
 
 func (p *ProjectsHandler) sendNotification(ctx context.Context, subject string, message interface{}) error {

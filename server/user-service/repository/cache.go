@@ -37,6 +37,8 @@ const (
 	cacheRequests          = "requests"
 	cacheUser              = "activeUser"
 	cacheRegister          = "register"
+	signError              = "Unexpected signing method"
+	invalidToken           = "invalid token"
 )
 
 func constructKeyForRequest(id string) string {
@@ -156,8 +158,8 @@ func (uc *UserCache) GetUserIDFromToken(ctx context.Context, token string) (stri
 	defer span.End()
 	parsedToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			span.RecordError(errors.New("Unexpected signing method"))
-			span.SetStatus(codes.Error, "Unexpected signing method")
+			span.RecordError(errors.New(signError))
+			span.SetStatus(codes.Error, signError)
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(os.Getenv("SECRET_KEY")), nil
@@ -166,7 +168,7 @@ func (uc *UserCache) GetUserIDFromToken(ctx context.Context, token string) (stri
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uc.log.Println("Error parsing token:", err)
-		return "", errors.New("invalid token")
+		return "", errors.New(invalidToken)
 	}
 
 	if claims, ok := parsedToken.Claims.(jwt.MapClaims); ok && parsedToken.Valid {
@@ -175,7 +177,7 @@ func (uc *UserCache) GetUserIDFromToken(ctx context.Context, token string) (stri
 		return userID, nil
 	}
 	span.RecordError(err)
-	span.SetStatus(codes.Error, "Invalid token")
+	span.SetStatus(codes.Error, invalidToken)
 	return "", errors.New("invalid token or missing user ID")
 }
 
@@ -336,8 +338,8 @@ func (uc *UserCache) GetRoleFromToken(ctx context.Context, token string) (string
 	defer span.End()
 	parsedToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			span.RecordError(errors.New("Unexpected signing method"))
-			span.SetStatus(codes.Error, "Unexpected signing method")
+			span.RecordError(errors.New(signError))
+			span.SetStatus(codes.Error, signError)
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(os.Getenv("SECRET_KEY")), nil
@@ -346,7 +348,7 @@ func (uc *UserCache) GetRoleFromToken(ctx context.Context, token string) (string
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uc.log.Println("Error parsing token:", err)
-		return "", errors.New("invalid token")
+		return "", errors.New(invalidToken)
 	}
 
 	if claims, ok := parsedToken.Claims.(jwt.MapClaims); ok && parsedToken.Valid {
@@ -354,8 +356,8 @@ func (uc *UserCache) GetRoleFromToken(ctx context.Context, token string) (string
 		span.SetStatus(codes.Ok, "Role has been successfully retrieved.")
 		return userRole, nil
 	}
-	span.RecordError(errors.New("invalid token"))
-	span.SetStatus(codes.Error, "Invalid token")
+	span.RecordError(errors.New(invalidToken))
+	span.SetStatus(codes.Error, invalidToken)
 
 	return "", errors.New("role not found in token")
 }

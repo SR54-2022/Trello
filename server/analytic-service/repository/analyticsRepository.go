@@ -26,6 +26,7 @@ const (
 	usersOnProject           = "users_on_project.user_id"
 	errFetchingProjectFormat = "Error fetching project: projectID=%s, error=%v"
 	errGeneric               = "[ERROR] %s"
+	taskSpent                = "tasks_time_spent.task_id"
 )
 
 func NewAnalyticsRepo(ctx context.Context, logger *log.Logger, tracer trace.Tracer) (*AnalyticsRepo, error) {
@@ -307,8 +308,8 @@ func (ar *AnalyticsRepo) fetchTask(ctx context.Context, projectID string, taskID
 
 	var task bson.M
 	err := collection.FindOne(ctx, bson.M{
-		"project_id":               projectID,
-		"tasks_time_spent.task_id": taskID,
+		"project_id": projectID,
+		taskSpent:    taskID,
 	}).Decode(&task)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error fetching task: projectID=%s, taskID=%s, error=%v", projectID, taskID, err)
@@ -359,7 +360,7 @@ func (ar *AnalyticsRepo) getPreviousStatus(task bson.M, taskID string) (string, 
 
 func (ar *AnalyticsRepo) updatePreviousStateEnd(ctx context.Context, projectID string, taskID string, taskIndex int) error {
 	collection := ar.cli.Database("analytics_db").Collection("analytics")
-	filter := bson.M{"project_id": projectID, "tasks_time_spent.task_id": taskID}
+	filter := bson.M{"project_id": projectID, taskSpent: taskID}
 
 	updateEnd := bson.M{
 		"$set": bson.M{
@@ -385,7 +386,7 @@ func (ar *AnalyticsRepo) updatePreviousStateEnd(ctx context.Context, projectID s
 
 func (ar *AnalyticsRepo) pushNewState(ctx context.Context, projectID string, taskID string, newStatus string, prevStatus string, taskIndex int) error {
 	collection := ar.cli.Database("analytics_db").Collection("analytics")
-	filter := bson.M{"project_id": projectID, "tasks_time_spent.task_id": taskID}
+	filter := bson.M{"project_id": projectID, taskSpent: taskID}
 
 	updatePush := bson.M{
 		"$push": bson.M{

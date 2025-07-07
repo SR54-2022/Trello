@@ -26,7 +26,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"time"
 )
 
@@ -46,6 +45,19 @@ type Task struct {
 }
 type TaskStatus string
 
+const (
+	receivedReq     = "Received %s request for %s"
+	contentType     = "Content-Type"
+	appJson         = "application/json"
+	responseErr     = "Error writing response: "
+	jsonConvert     = "Unable to convert to json. "
+	tokenValidation = "Token validation failed: "
+	userNotFound    = "user id not found"
+	encodeErr       = "Error encoding response: "
+	reqBodyErr      = "Invalid request body"
+	emailRequired   = "Email is required"
+)
+
 func NewUserHandler(logger *log.Logger, service *service.UserService, tracer trace.Tracer, custLogger *customLogger.Logger) *UserHandler {
 	return &UserHandler{logger, service, tracer, custLogger}
 }
@@ -58,10 +70,10 @@ func ExtractTraceInfoMiddleware(next http.Handler) http.Handler {
 }
 
 func (uh *UserHandler) Registration(rw http.ResponseWriter, h *http.Request) {
-	uh.logger.Printf("Received %s request for %s", h.Method, h.URL.Path)
+	uh.logger.Printf(receivedReq, h.Method, h.URL.Path)
 	ctx, span := uh.tracer.Start(h.Context(), "UserHandler.Registration")
 	defer span.End()
-	uh.custLogger.Info(nil, fmt.Sprintf("Received %s request for %s", h.Method, h.URL.Path))
+	uh.custLogger.Info(nil, fmt.Sprintf(receivedReq, h.Method, h.URL.Path))
 
 	// Decode request body
 	request, err := decodeBody(h.Body)
@@ -93,14 +105,14 @@ func (uh *UserHandler) Registration(rw http.ResponseWriter, h *http.Request) {
 	uh.custLogger.Info(logrus.Fields{"email": request.Email}, "Registration successful")
 
 	// Send success response
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusCreated)
 	response := map[string]string{"message": "Registration successful"}
 	err = json.NewEncoder(rw).Encode(response)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
+		uh.logger.Println(responseErr, err)
 		uh.custLogger.Error(nil, "Error writing registration response: "+err.Error())
 		return
 	}
@@ -126,8 +138,8 @@ func (uh *UserHandler) GetManagers(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		uh.logger.Fatal("Unable to convert to json :", err)
+		http.Error(rw, jsonConvert, http.StatusInternalServerError)
+		uh.logger.Fatal(jsonConvert, err)
 		return
 	}
 	span.SetStatus(codes.Ok, "Retrieving managers handled successfully")
@@ -155,7 +167,7 @@ func (uh *UserHandler) MiddlewareExtractUserFromCookie(next http.Handler) http.H
 		// Validate the token
 		userID, role, err := uh.service.ValidateToken(h.Context(), cookie.Value)
 		if err != nil {
-			uh.logger.Println("Token validation failed:", err)
+			uh.logger.Println(tokenValidation, err)
 			uh.custLogger.Error(logrus.Fields{
 				"token": cookie.Value,
 				"error": err.Error(),
@@ -187,10 +199,10 @@ func (uh *UserHandler) GetManager(rw http.ResponseWriter, h *http.Request) {
 	defer span.End()
 	userID, ok := h.Context().Value(KeyAccount{}).(string)
 	if !ok {
-		span.RecordError(errors.New("user id not found"))
-		span.SetStatus(codes.Error, errors.New("user id not found").Error())
-		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		uh.logger.Println("User ID not found in context")
+		span.RecordError(errors.New(userNotFound))
+		span.SetStatus(codes.Error, errors.New(userNotFound).Error())
+		http.Error(rw, userNotFound, http.StatusUnauthorized)
+		uh.logger.Println(userNotFound)
 		return
 	}
 	_, findOneSpan := uh.tracer.Start(context.Background(), "UserHandler.GetManager.FindOne")
@@ -214,30 +226,30 @@ func (uh *UserHandler) GetManager(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
-		uh.logger.Fatal("Unable to convert to json :", err)
+		http.Error(rw, jsonConvert, http.StatusInternalServerError)
+		uh.logger.Fatal(jsonConvert, err)
 		return
 	}
 	span.SetStatus(codes.Ok, "Manager retrieval handled successfully")
 }
 
 func (uh *UserHandler) DeleteUser(rw http.ResponseWriter, h *http.Request) {
-	ctx, span := uh.tracer.Start(h.Context(), "UserHandler.DeleteUser")
+	ctx, span := uh.tracer.Start(h.Context(), "User Handler.DeleteUser ")
 	defer span.End()
 
 	userID, _ := h.Context().Value(KeyAccount{}).(string)
 
 	manager, err := uh.service.GetOne(ctx, userID)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Printf("Database exception: %v, Id: %s", err, userID)
-		http.Error(rw, "Error fetching manager details", http.StatusInternalServerError)
+		uh.handleError(span, err, rw, "Error fetching manager details", http.StatusInternalServerError)
 		return
 	}
 
-	projectUrl := os.Getenv("LINK_TO_PROJECT_SERVICE")
-	projectServiceURL := fmt.Sprintf("%s/projects", projectUrl)
+	projectServiceURL, err := uh.getProjectServiceURL()
+	if err != nil {
+		http.Error(rw, "Error creating project service URL", http.StatusInternalServerError)
+		return
+	}
 
 	clientToDo, err := createTLSClient()
 	if err != nil {
@@ -246,53 +258,66 @@ func (uh *UserHandler) DeleteUser(rw http.ResponseWriter, h *http.Request) {
 		return
 	}
 
-	projectBreaker := gobreaker.NewCircuitBreaker(
-		gobreaker.Settings{
-			Name:        "DeleteUserProjectService",
-			MaxRequests: 10,
-			Timeout:     10 * time.Second,
-			Interval:    0,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				return counts.ConsecutiveFailures > 2
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				uh.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
-			},
-		},
-	)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", projectServiceURL, nil)
+	req, err := uh.createProjectServiceRequest(ctx, projectServiceURL, h, rw)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Printf("Failed to create request to project-service: %v", err)
+		return
+	}
+
+	resp, err := uh.sendProjectServiceRequest(ctx, req, clientToDo)
+	if err != nil {
 		http.Error(rw, "Error communicating with project service", http.StatusInternalServerError)
 		return
+	}
+
+	if err := uh.handleProjectServiceResponse(resp, rw, userID, manager.Role, h); err != nil {
+		return
+	}
+
+	if err := uh.service.Delete(ctx, userID); err != nil {
+		uh.logger.Println("Failed to delete user:", err)
+		http.Error(rw, "Error deleting user", http.StatusInternalServerError)
+		return
+	}
+
+	rw.WriteHeader(http.StatusOK)
+	rw.Write([]byte("User  deleted successfully"))
+	span.SetStatus(codes.Ok, "User  deleted successfully")
+}
+
+func (uh *UserHandler) getProjectServiceURL() (string, error) {
+	projectUrl := os.Getenv("LINK_TO_PROJECT_SERVICE")
+	return fmt.Sprintf("%s/projects", projectUrl), nil
+}
+
+func (uh *UserHandler) createProjectServiceRequest(ctx context.Context, projectServiceURL string, h *http.Request, rw http.ResponseWriter) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", projectServiceURL, nil)
+	if err != nil {
+		uh.logger.Printf("Failed to create request to project-service: %v", err)
+		return nil, err
 	}
 
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	authTokenCookie, err := h.Cookie("auth_token")
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Println("No auth token cookie found:", err)
 		http.Error(rw, "Authorization token required", http.StatusUnauthorized)
-		return
+		return nil, err
 	}
 	req.AddCookie(authTokenCookie)
+
+	return req, nil
+}
+
+func (uh *UserHandler) sendProjectServiceRequest(ctx context.Context, req *http.Request, clientToDo *http.Client) (*http.Response, error) {
+	projectBreaker := uh.createCircuitBreaker()
 
 	retryAgain := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
 
 	var resp *http.Response
-	retryCount := 0
-
-	err = retryAgain.RunCtx(ctx, func(ctx context.Context) error {
-		retryCount++
-		uh.logger.Printf("Attempting project service request, attempt #%d", retryCount)
-
+	err := retryAgain.RunCtx(ctx, func(ctx context.Context) error {
 		_, err := projectBreaker.Execute(func() (interface{}, error) {
-			resp, err = clientToDo.Do(req)
+			resp, err := clientToDo.Do(req)
 			if err != nil {
 				return nil, err
 			}
@@ -316,81 +341,19 @@ func (uh *UserHandler) DeleteUser(rw http.ResponseWriter, h *http.Request) {
 			return resp, nil
 		})
 
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return err
 	})
 
-	if err != nil {
-		uh.logger.Println("Error during project service request:", err)
-		http.Error(rw, "Error communicating with project service", http.StatusInternalServerError)
-		return
-	}
-
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
-		var projects []service.Project
-		if resp.StatusCode == http.StatusOK {
-			if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
-				uh.logger.Println("Failed to decode project-service response:", err)
-				http.Error(rw, "Error parsing project service response", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			projects = []service.Project{}
-		}
-
-		if manager.Role == "member" {
-			for _, project := range projects {
-				for _, user := range project.UserIDs {
-					if user == userID {
-						http.Error(rw, "Member has active projects, deletion blocked", http.StatusConflict)
-						return
-					}
-				}
-			}
-		}
-
-		if uh.checkTasks(h.Context(), projects, userID, manager.Role, authTokenCookie) {
-			http.Error(rw, "User has active projects, deletion blocked", http.StatusConflict)
-			return
-		}
-
-		err = uh.service.Delete(ctx, userID)
-		if err != nil {
-			uh.logger.Println("Failed to delete user:", err)
-			http.Error(rw, "Error deleting user", http.StatusInternalServerError)
-			return
-		}
-
-		rw.WriteHeader(http.StatusOK)
-		rw.Write([]byte("User deleted successfully"))
-		span.SetStatus(codes.Ok, "User deleted successfully")
-	} else {
-		uh.logger.Printf("Unexpected response code %d from project service\n", resp.StatusCode)
-		http.Error(rw, "Error checking manager projects", http.StatusInternalServerError)
-	}
+	return resp, err
 }
 
-func (uh *UserHandler) checkTasks(ctx context.Context, projects []service.Project, userID, role string, authTokenCookie *http.Cookie) bool {
-	ctx, span := uh.tracer.Start(ctx, "UserHandler.checkTasks")
-	defer span.End()
-
-	tlsClient, err := createTLSClient()
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Printf("Error creating TLS tlsClient: %v\n", err)
-		return false
-	}
-
-	taskServiceBreaker := gobreaker.NewCircuitBreaker(
+func (uh *UserHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
+	return gobreaker.NewCircuitBreaker(
 		gobreaker.Settings{
-			Name:        "TaskServiceCircuitBreaker",
+			Name:        "DeleteUser ProjectService",
 			MaxRequests: 10,
 			Timeout:     10 * time.Second,
-			Interval:    0 * time.Second,
+			Interval:    0,
 			ReadyToTrip: func(counts gobreaker.Counts) bool {
 				return counts.ConsecutiveFailures > 2
 			},
@@ -399,124 +362,200 @@ func (uh *UserHandler) checkTasks(ctx context.Context, projects []service.Projec
 			},
 		},
 	)
+}
 
-	var timeout time.Duration
-	deadline, reqHasDeadline := ctx.Deadline()
-	classifier := retrier.WhitelistClassifier{domain.ErrRespTmp{}}
-	retryAgain := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), classifier)
-
-	for _, project := range projects {
-		linkToTaskService := os.Getenv("LINK_TO_TASK_SERVICE")
-		taskServiceURL := fmt.Sprintf("%s/tasks/%s", linkToTaskService, project.ID)
-		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second) // Set timeout for each request
-		defer cancel()
-
-		taskReq, err := http.NewRequestWithContext(reqCtx, "GET", taskServiceURL, nil)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			uh.logger.Printf("Failed to create request to task-service for project %s: %v", project.ID, err)
-			continue
-		}
-
-		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(taskReq.Header))
-		taskReq.Header.Set("Content-Type", "application/json")
-		taskReq.AddCookie(authTokenCookie)
-
-		var taskResp *http.Response
-		retryCount := 0
-
-		err = retryAgain.RunCtx(reqCtx, func(ctx context.Context) error {
-			retryCount++
-			uh.logger.Printf("Attempting task service request, attempt #%d", retryCount)
-
-			if reqHasDeadline {
-				timeout = time.Until(deadline)
-			}
-
-			_, err := taskServiceBreaker.Execute(func() (interface{}, error) {
-				if timeout > 0 {
-					taskReq.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
-				}
-				resp, err := tlsClient.Do(taskReq)
-				if err != nil {
-					return nil, err
-				}
-
-				if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-					return nil, domain.ErrRespTmp{
-						URL:        resp.Request.URL.String(),
-						Method:     resp.Request.Method,
-						StatusCode: resp.StatusCode,
-					}
-				}
-
-				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-					return nil, domain.ErrResp{
-						URL:        resp.Request.URL.String(),
-						Method:     resp.Request.Method,
-						StatusCode: resp.StatusCode,
-					}
-				}
-
-				taskResp = resp
-				return resp, nil
-			})
-
-			if err != nil {
+func (uh *UserHandler) handleProjectServiceResponse(resp *http.Response, rw http.ResponseWriter, userID, role string, h *http.Request) error {
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+		var projects []service.Project
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
+				uh.logger.Println("Failed to decode project-service response:", err)
+				http.Error(rw, "Error parsing project service response", http.StatusInternalServerError)
 				return err
 			}
-
-			return nil
-		})
-
-		if err != nil {
-			uh.logger.Printf("Error during task service request for project %s: %v", project.ID, err)
-			continue
 		}
-		defer taskResp.Body.Close()
 
-		if taskResp.StatusCode == http.StatusServiceUnavailable || taskResp.StatusCode == http.StatusGatewayTimeout {
-			uh.logger.Printf("Temporary error (503/504) from task-service for project %s, terminating user check", project.ID)
+		if role == "member" && uh.hasActiveProjects(projects, userID) {
+			http.Error(rw, "Member has active projects, deletion blocked", http.StatusConflict)
+			return errors.New("member has active projects")
+		}
+
+		if uh.checkTasks(h.Context(), projects, userID, role, nil) {
+			http.Error(rw, "User  has active projects, deletion blocked", http.StatusConflict)
+			return errors.New("user has active projects")
+		}
+
+		return nil
+	}
+
+	uh.logger.Printf("Unexpected response code %d from project service\n", resp.StatusCode)
+	http.Error(rw, "Error checking manager projects", http.StatusInternalServerError)
+	return errors.New("unexpected response code")
+}
+
+func (uh *UserHandler) hasActiveProjects(projects []service.Project, userID string) bool {
+	for _, project := range projects {
+		for _, user := range project.UserIDs {
+			if user == userID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (uh *UserHandler) handleError(span trace.Span, err error, rw http.ResponseWriter, message string, statusCode int) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	uh.logger.Println(message, ":", err)
+	http.Error(rw, message, statusCode)
+}
+
+func (uh *UserHandler) checkTasks(ctx context.Context, projects []service.Project, userID, role string, authTokenCookie *http.Cookie) bool {
+	ctx, span := uh.tracer.Start(ctx, "User Handler.checkTasks")
+	defer span.End()
+
+	tlsClient, err := createTLSClient()
+	if err != nil {
+		uh.recordError(span, err, "Error creating TLS client")
+		return false
+	}
+
+	taskServiceBreaker := uh.createCircuitBreaker()
+
+	retryAgain := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
+
+	for _, project := range projects {
+		if uh.checkProjectTasks(ctx, project, userID, role, authTokenCookie, tlsClient, taskServiceBreaker, retryAgain, span) {
 			return true
-		}
-
-		if taskResp.StatusCode != http.StatusOK && taskResp.StatusCode != http.StatusNoContent {
-			uh.logger.Printf("Unexpected response from task-service for project %s: %s", project.ID, taskResp.Status)
-			continue
-		}
-
-		var tasks []Task
-		if err := json.NewDecoder(taskResp.Body).Decode(&tasks); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			uh.logger.Printf("Failed to decode task-service response for project %s: %v", project.ID, err)
-			continue
-		}
-
-		if role == "manager" {
-			for _, task := range tasks {
-				if task.Status == "Pending" || task.Status == "InProgress" {
-					span.SetStatus(codes.Ok, "Tasks found for manager")
-					return true
-				}
-			}
-		} else {
-			for _, task := range tasks {
-				if task.Status == "Pending" || task.Status == "InProgress" {
-					for _, id := range task.UserIDs {
-						if id == userID {
-							span.SetStatus(codes.Ok, "Task found for member")
-							return true
-						}
-					}
-				}
-			}
 		}
 	}
 
 	span.SetStatus(codes.Ok, "No active tasks found")
 	return false
+}
+
+func (uh *UserHandler) checkProjectTasks(ctx context.Context, project service.Project, userID, role string, authTokenCookie *http.Cookie, tlsClient *http.Client, taskServiceBreaker *gobreaker.CircuitBreaker, retryAgain *retrier.Retrier, span trace.Span) bool {
+	taskServiceURL := fmt.Sprintf("%s/tasks/%s", os.Getenv("LINK_TO_TASK_SERVICE"), project.ID)
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	taskReq, err := uh.createTaskRequest(reqCtx, taskServiceURL, authTokenCookie)
+	if err != nil {
+		uh.recordError(span, err, "Failed to create request to task-service")
+		return false
+	}
+
+	taskResp, err := uh.sendTaskServiceRequest(reqCtx, taskReq, tlsClient, taskServiceBreaker, retryAgain, span)
+	if err != nil {
+		uh.logger.Printf("Error during task service request for project %s: %v", project.ID, err)
+		return false
+	}
+	defer taskResp.Body.Close()
+
+	if taskResp.StatusCode == http.StatusServiceUnavailable || taskResp.StatusCode == http.StatusGatewayTimeout {
+		uh.logger.Printf("Temporary error (503/504) from task-service for project %s, terminating user check", project.ID)
+		return true
+	}
+
+	if taskResp.StatusCode != http.StatusOK && taskResp.StatusCode != http.StatusNoContent {
+		uh.logger.Printf("Unexpected response from task-service for project %s: %s", project.ID, taskResp.Status)
+		return false
+	}
+
+	return uh.processTaskResponse(taskResp, userID, role, span)
+}
+
+func (uh *UserHandler) createTaskRequest(ctx context.Context, taskServiceURL string, authTokenCookie *http.Cookie) (*http.Request, error) {
+	taskReq, err := http.NewRequestWithContext(ctx, "GET", taskServiceURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(taskReq.Header))
+	taskReq.Header.Set(contentType, appJson)
+	taskReq.AddCookie(authTokenCookie)
+
+	return taskReq, nil
+}
+
+func (uh *UserHandler) sendTaskServiceRequest(ctx context.Context, taskReq *http.Request, tlsClient *http.Client, taskServiceBreaker *gobreaker.CircuitBreaker, retryAgain *retrier.Retrier, span trace.Span) (*http.Response, error) {
+	var taskResp *http.Response
+
+	err := retryAgain.RunCtx(ctx, func(ctx context.Context) error {
+		_, err := taskServiceBreaker.Execute(func() (interface{}, error) {
+			resp, err := tlsClient.Do(taskReq)
+			if err != nil {
+				return nil, err
+			}
+
+			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+				return nil, domain.ErrRespTmp{
+					URL:        resp.Request.URL.String(),
+					Method:     resp.Request.Method,
+					StatusCode: resp.StatusCode,
+				}
+			}
+
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+				return nil, domain.ErrResp{
+					URL:        resp.Request.URL.String(),
+					Method:     resp.Request.Method,
+					StatusCode: resp.StatusCode,
+				}
+			}
+
+			taskResp = resp
+			return resp, nil
+		})
+
+		return err
+	})
+
+	return taskResp, err
+}
+
+func (uh *UserHandler) processTaskResponse(taskResp *http.Response, userID, role string, span trace.Span) bool {
+	var tasks []Task
+	if err := json.NewDecoder(taskResp.Body).Decode(&tasks); err != nil {
+		uh.recordError(span, err, "Failed to decode task-service response")
+		return false
+	}
+
+	if role == "manager" {
+		return uh.hasActiveTasksForManager(tasks, span)
+	}
+	return uh.hasActiveTasksForMember(tasks, userID, span)
+}
+
+func (uh *UserHandler) hasActiveTasksForManager(tasks []Task, span trace.Span) bool {
+	for _, task := range tasks {
+		if task.Status == "Pending" || task.Status == "InProgress" {
+			span.SetStatus(codes.Ok, "Tasks found for manager")
+			return true
+		}
+	}
+	return false
+}
+
+func (uh *UserHandler) hasActiveTasksForMember(tasks []Task, userID string, span trace.Span) bool {
+	for _, task := range tasks {
+		if task.Status == "Pending" || task.Status == "InProgress" {
+			for _, id := range task.UserIDs {
+				if id == userID {
+					span.SetStatus(codes.Ok, "Task found for member")
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (uh *UserHandler) recordError(span trace.Span, err error, message string) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	uh.logger.Printf("%s: %v", message, err)
 }
 
 func decodeBody(r io.Reader) (*data.AccountRequest, error) {
@@ -544,7 +583,7 @@ func decodeLoginBody(r io.Reader) (*data.LoginCredentials, error) {
 func (uh *UserHandler) GetAllMembers(rw http.ResponseWriter, h *http.Request) {
 	ctx, span := uh.tracer.Start(h.Context(), "UserHandler.GetAllMembers")
 	defer span.End()
-	uh.logger.Printf("Received %s request for %s", h.Method, h.URL.Path)
+	uh.logger.Printf(receivedReq, h.Method, h.URL.Path)
 
 	accounts, err := uh.service.GetAllMembers(ctx)
 	if err != nil {
@@ -555,13 +594,13 @@ func (uh *UserHandler) GetAllMembers(rw http.ResponseWriter, h *http.Request) {
 		return
 	}
 
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(rw).Encode(accounts)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
+		uh.logger.Println(responseErr, err)
 		return
 	}
 	span.SetStatus(codes.Ok, "Successfully retrieved members")
@@ -684,7 +723,7 @@ func (uh *UserHandler) Login(rw http.ResponseWriter, h *http.Request) {
 	}, "Authentication token set in cookie")
 
 	// Send success response
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusCreated)
 
 	response := map[string]string{
@@ -695,8 +734,8 @@ func (uh *UserHandler) Login(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error encoding response:", err)
-		uh.custLogger.Error(nil, "Error encoding response: "+err.Error())
+		uh.logger.Println(encodeErr, err)
+		uh.custLogger.Error(nil, encodeErr+err.Error())
 		http.Error(rw, `{"message": "Internal Server Error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -705,8 +744,8 @@ func (uh *UserHandler) Login(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
-		uh.custLogger.Error(nil, "Error writing response: "+err.Error())
+		uh.logger.Println(responseErr, err)
+		uh.custLogger.Error(nil, responseErr+err.Error())
 	}
 	span.SetStatus(codes.Ok, "Successfully logged in")
 	uh.logger.Println("Login response sent successfully")
@@ -719,11 +758,11 @@ func (uh *UserHandler) Logout(rw http.ResponseWriter, h *http.Request) {
 	// Dohvatanje User ID iz konteksta
 	userID, ok := h.Context().Value(KeyAccount{}).(string)
 	if !ok {
-		span.RecordError(errors.New("user id not found"))
-		span.SetStatus(codes.Error, "user id not found")
-		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		uh.logger.Println("User ID not found in context")
-		uh.custLogger.Warn(nil, "User ID not found in context")
+		span.RecordError(errors.New(userNotFound))
+		span.SetStatus(codes.Error, userNotFound)
+		http.Error(rw, userNotFound, http.StatusUnauthorized)
+		uh.logger.Println(userNotFound)
+		uh.custLogger.Warn(nil, userNotFound)
 		return
 	}
 	uh.custLogger.Info(logrus.Fields{"user_id": userID}, "Processing logout request")
@@ -753,7 +792,7 @@ func (uh *UserHandler) Logout(rw http.ResponseWriter, h *http.Request) {
 	uh.custLogger.Info(logrus.Fields{"user_id": userID}, "Authentication token cleared in cookie")
 
 	// Slanje uspešnog odgovora
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusOK)
 
 	response := map[string]string{"message": "Logged out successfully"}
@@ -761,7 +800,7 @@ func (uh *UserHandler) Logout(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error encoding response:", err)
+		uh.logger.Println(encodeErr, err)
 		uh.custLogger.Error(logrus.Fields{"user_id": userID}, "Error encoding logout response: "+err.Error())
 		http.Error(rw, `{"message": "Internal Server Error"}`, http.StatusInternalServerError)
 		return
@@ -771,7 +810,7 @@ func (uh *UserHandler) Logout(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
+		uh.logger.Println(responseErr, err)
 		uh.custLogger.Error(logrus.Fields{"user_id": userID}, "Error writing logout response: "+err.Error())
 	}
 	span.SetStatus(codes.Ok, "Successfully logged out")
@@ -787,17 +826,17 @@ func (uh *UserHandler) CheckPasswords(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
 	userID, ok := r.Context().Value(KeyAccount{}).(string)
 	if !ok {
-		span.RecordError(errors.New("user id not found"))
-		span.SetStatus(codes.Error, "user id not found")
-		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		uh.logger.Println("User ID not found in context")
+		span.RecordError(errors.New(userNotFound))
+		span.SetStatus(codes.Error, userNotFound)
+		http.Error(rw, userNotFound, http.StatusUnauthorized)
+		uh.logger.Println(userNotFound)
 		return
 	}
 
@@ -809,7 +848,7 @@ func (uh *UserHandler) CheckPasswords(rw http.ResponseWriter, r *http.Request) {
 		responseString = "true"
 	}
 
-	rw.Header().Set("Content-Type", "text/plain")
+	rw.Header().Set(contentType, "text/plain")
 	rw.WriteHeader(http.StatusOK)
 
 	_, writeErr := rw.Write([]byte(responseString))
@@ -833,9 +872,9 @@ func (uh *UserHandler) ChangePassword(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
-		uh.logger.Println("Invalid request body:", err)
-		uh.custLogger.Error(nil, "Invalid request body: "+err.Error())
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
+		uh.logger.Println(reqBodyErr, err)
+		uh.custLogger.Error(nil, reqBodyErr+err.Error())
 		return
 	}
 	defer h.Body.Close()
@@ -844,11 +883,11 @@ func (uh *UserHandler) ChangePassword(rw http.ResponseWriter, h *http.Request) {
 	// Dohvatanje korisničkog ID-a iz konteksta
 	userID, ok := h.Context().Value(KeyAccount{}).(string)
 	if !ok {
-		span.RecordError(errors.New("user id not found"))
-		span.SetStatus(codes.Error, "user id not found")
-		http.Error(rw, "User ID not found", http.StatusUnauthorized)
-		uh.logger.Println("User ID not found in context")
-		uh.custLogger.Warn(nil, "User ID not found in context")
+		span.RecordError(errors.New(userNotFound))
+		span.SetStatus(codes.Error, userNotFound)
+		http.Error(rw, userNotFound, http.StatusUnauthorized)
+		uh.logger.Println(userNotFound)
+		uh.custLogger.Warn(nil, userNotFound)
 		return
 	}
 	uh.custLogger.Info(logrus.Fields{"user_id": userID}, "User ID retrieved from context")
@@ -910,7 +949,7 @@ func (uh *UserHandler) HandlePasswordReset(rw http.ResponseWriter, h *http.Reque
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		return
 	}
 	defer h.Body.Close()
@@ -935,7 +974,7 @@ func (uh *UserHandler) HandleMagic(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
@@ -960,7 +999,7 @@ func (uh *UserHandler) HandleMagicVerification(rw http.ResponseWriter, r *http.R
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
@@ -982,13 +1021,13 @@ func (uh *UserHandler) HandleMagicVerification(rw http.ResponseWriter, r *http.R
 	})
 
 	rw.WriteHeader(http.StatusOK)
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 
 	jsonResponse, err := json.Marshal(id)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error encoding response:", err)
+		uh.logger.Println(encodeErr, err)
 		http.Error(rw, `{"message": "Internal Server Error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -996,7 +1035,7 @@ func (uh *UserHandler) HandleMagicVerification(rw http.ResponseWriter, r *http.R
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
+		uh.logger.Println(responseErr, err)
 		http.Error(rw, `{"message": "Internal Server Error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -1016,7 +1055,7 @@ func (uh *UserHandler) ValidateToken(rw http.ResponseWriter, h *http.Request) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Println("Error decoding request body:", err)
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		return
 	}
 	defer h.Body.Close()
@@ -1027,7 +1066,7 @@ func (uh *UserHandler) ValidateToken(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Token validation failed:", err)
+		uh.logger.Println(tokenValidation, err)
 		http.Error(rw, `{"message": "Invalid token"}`, http.StatusUnauthorized)
 		return
 	}
@@ -1036,13 +1075,13 @@ func (uh *UserHandler) ValidateToken(rw http.ResponseWriter, h *http.Request) {
 		"user_id": userID,
 		"role":    role,
 	}
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(rw).Encode(response)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
+		uh.logger.Println(responseErr, err)
 		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 	}
 	span.SetStatus(codes.Ok, "Successfully validated token")
@@ -1095,14 +1134,14 @@ func (uh *UserHandler) MiddlewareCheckAuthenticated(next http.Handler) http.Hand
 func (uh *UserHandler) GetUsersByIds(rw http.ResponseWriter, h *http.Request) {
 	ctx, span := uh.tracer.Start(h.Context(), "UserHandler.GetUsersByIds")
 	defer span.End()
-	uh.logger.Printf("Received %s request for %s", h.Method, h.URL.Path)
+	uh.logger.Printf(receivedReq, h.Method, h.URL.Path)
 
 	var request data.UserIdsRequest
 	err := json.NewDecoder(h.Body).Decode(&request)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		uh.logger.Println("Error decoding user IDs:", err)
 		return
 	}
@@ -1125,14 +1164,14 @@ func (uh *UserHandler) GetUsersByIds(rw http.ResponseWriter, h *http.Request) {
 		return
 	}
 
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(rw).Encode(users)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
+		uh.logger.Println(responseErr, err)
+		http.Error(rw, jsonConvert, http.StatusInternalServerError)
 		return
 	}
 	span.SetStatus(codes.Ok, " users found")
@@ -1173,15 +1212,15 @@ func (uh *UserHandler) HandleGettingRole(rw http.ResponseWriter, h *http.Request
 	err := json.NewDecoder(h.Body).Decode(&payload)
 	if err != nil {
 		span.RecordError(err)
-		span.SetStatus(codes.Error, "Invalid request body")
-		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		span.SetStatus(codes.Error, reqBodyErr)
+		http.Error(rw, reqBodyErr, http.StatusBadRequest)
 		return
 	}
 
 	if payload.Email == "" {
-		span.RecordError(errors.New("email is required"))
-		span.SetStatus(codes.Error, "Email is required")
-		http.Error(rw, "Email is required", http.StatusBadRequest)
+		span.RecordError(errors.New(emailRequired))
+		span.SetStatus(codes.Error, emailRequired)
+		http.Error(rw, emailRequired, http.StatusBadRequest)
 		return
 	}
 
@@ -1194,14 +1233,14 @@ func (uh *UserHandler) HandleGettingRole(rw http.ResponseWriter, h *http.Request
 	}
 
 	rw.WriteHeader(http.StatusOK)
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	rw.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(rw).Encode(role)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
-		http.Error(rw, "Unable to convert to json", http.StatusInternalServerError)
+		uh.logger.Println(responseErr, err)
+		http.Error(rw, jsonConvert, http.StatusInternalServerError)
 	}
 	span.SetStatus(codes.Ok, " role found")
 
@@ -1213,9 +1252,9 @@ func (uh *UserHandler) HandleAccountVerification(rw http.ResponseWriter, h *http
 
 	email := mux.Vars(h)["email"]
 	if len(email) == 0 {
-		span.RecordError(errors.New("email is required"))
-		span.SetStatus(codes.Error, "Email is required")
-		http.Error(rw, "Email is required", http.StatusBadRequest)
+		span.RecordError(errors.New(emailRequired))
+		span.SetStatus(codes.Error, emailRequired)
+		http.Error(rw, emailRequired, http.StatusBadRequest)
 		return
 	}
 
@@ -1254,19 +1293,19 @@ func (uh *UserHandler) GetUserIdFromToken(rw http.ResponseWriter, h *http.Reques
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Token validation failed:", err)
+		uh.logger.Println(tokenValidation, err)
 		http.Error(rw, `{"message": "Invalid token"}`, http.StatusUnauthorized)
 		return
 	}
 
-	rw.Header().Set("Content-Type", "text/plain")
+	rw.Header().Set(contentType, "text/plain")
 	rw.WriteHeader(http.StatusOK)
 
 	_, err = rw.Write([]byte(userID))
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		uh.logger.Println("Error writing response:", err)
+		uh.logger.Println(responseErr, err)
 		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 	}
 

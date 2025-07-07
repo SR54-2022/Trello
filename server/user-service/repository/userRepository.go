@@ -33,6 +33,10 @@ type UserRepository struct {
 	tracer     trace.Tracer
 }
 
+const (
+	errAccount = "Error finding account:"
+)
+
 func New(ctx context.Context, logger *log.Logger, custLogger *customLogger.Logger, tracer trace.Tracer) (*UserRepository, error) {
 	dburi := os.Getenv("MONGO_DB_URI")
 
@@ -64,60 +68,6 @@ func (ur *UserRepository) Disconnect(ctx context.Context) error {
 	span.SetStatus(codes.Ok, "Successfully disconnected")
 	return nil
 }
-
-//func (ur *UserRepository) Registration(ctx context.Context, request *data.AccountRequest) error {
-//	ctx, span := ur.tracer.Start(ctx, "UserRepository.Registration")
-//	defer span.End()
-//
-//	if err := ur.cli.Ping(ctx, readpref.Primary()); err != nil {
-//		span.RecordError(err)
-//		span.SetStatus(codes.Error, "Database not available")
-//		return fmt.Errorf("database not available: %w", err)
-//	}
-//
-//	var existingAccount data.Account
-//	err := ur.getAccountCollection().FindOne(ctx, bson.M{"email": request.Email}).Decode(&existingAccount)
-//
-//	if err == nil {
-//		span.SetStatus(codes.Error, "Email already exists")
-//		ur.logger.Println("TraceID:", span.SpanContext().TraceID().String(), "Email already exists")
-//		return data.ErrEmailAlreadyExists()
-//	}
-//	uuidPassword := uuid.New().String()
-//	hashedPassword, err := hashPassword(uuidPassword)
-//	if err != nil {
-//		span.RecordError(err)
-//		span.SetStatus(codes.Error, "Failed to hash password")
-//		return fmt.Errorf("failed to hash password: %w", err)
-//	}
-//
-//	account := &data.Account{
-//		Email:     request.Email,
-//		FirstName: request.FirstName,
-//		LastName:  request.LastName,
-//		Password:  hashedPassword,
-//		Role:      request.Role,
-//	}
-//	_, err = ur.getAccountCollection().InsertOne(ctx, account)
-//
-//	if err != nil {
-//		span.RecordError(err)
-//		span.SetStatus(codes.Error, "Failed to insert account")
-//		return fmt.Errorf("failed to insert account: %w", err)
-//	}
-//
-//	err = sendEmail(account, uuidPassword)
-//
-//	if err != nil {
-//		span.RecordError(err)
-//		span.SetStatus(codes.Error, "Failed to send email")
-//		return fmt.Errorf("failed to send email: %w", err)
-//	}
-//
-//	span.SetStatus(codes.Ok, "Account successfully created")
-//	ur.logger.Println("Account created successfully")
-//	return nil
-//}
 
 func hashPassword(password string) (string, error) {
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -300,7 +250,7 @@ func (ur *UserRepository) GetUserIdByEmail(ctx context.Context, email string) (p
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return primitive.NilObjectID, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found account")
@@ -317,7 +267,7 @@ func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, email string) 
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return "", err
 	}
 	span.SetStatus(codes.Ok, "Successfully found role")
@@ -333,7 +283,7 @@ func (ur *UserRepository) GetUserByEmail(ctx context.Context, email string) (dat
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return data.Account{}, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found user")
@@ -356,7 +306,7 @@ func (ur *UserRepository) GetUserById(ctx context.Context, id string) (data.Acco
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return data.Account{}, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found user")
@@ -370,7 +320,7 @@ func (ur *UserRepository) CheckIfPasswordIsSame(ctx context.Context, id string, 
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return false
 	}
 	err = bcrypt.CompareHashAndPassword([]byte(acc.Password), []byte(password))
@@ -475,13 +425,13 @@ func (ur *UserRepository) HandleRecoveryRequest(ctx context.Context, email strin
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return err
 	}
 	if len(existingAccount.Email) == 0 {
 		span.RecordError(data.ErrEmailDoesntExist())
 		span.SetStatus(codes.Error, data.ErrEmailDoesntExist().Error())
-		ur.logger.Println("Error finding account:", data.ErrEmailDoesntExist())
+		ur.logger.Println(errAccount, data.ErrEmailDoesntExist())
 		return data.ErrEmailDoesntExist()
 	}
 	err = SendRecoveryEmail(email)
@@ -507,15 +457,15 @@ func (ur *UserRepository) ResetPassword(ctx context.Context, email string, passw
 
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			span.RecordError(errors.New("Account not found"))
-			span.SetStatus(codes.Error, "Account not found")
+			span.RecordError(errors.New(errAccount))
+			span.SetStatus(codes.Error, errAccount)
 			ur.logger.Println("Error: Account not found for email:", email)
-			return errors.New("Account not found")
+			return errors.New(errAccount)
 		}
 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		ur.logger.Println("Error finding account:", err)
+		ur.logger.Println(errAccount, err)
 		return err
 	}
 

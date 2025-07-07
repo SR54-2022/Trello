@@ -29,6 +29,9 @@ func initUserClient() client.UserClient {
 
 func main() {
 
+	const (
+		taskFail = "Failed to subscribe to ProjectDeleted: %v"
+	)
 	fmt.Println("Task Service is starting...")
 
 	natsURL := os.Getenv("NATS_URL")
@@ -90,7 +93,7 @@ func main() {
 		taskHandler.HandleProjectDeleted(ctx, projectID)
 	})
 	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
+		logger.Fatalf(taskFail, err)
 	}
 	defer sub.Unsubscribe()
 
@@ -100,7 +103,7 @@ func main() {
 		taskHandler.DeletedTasks(ctx, projectID)
 	})
 	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
+		logger.Fatalf(taskFail, err)
 	}
 	defer sub2.Unsubscribe()
 
@@ -110,7 +113,7 @@ func main() {
 		taskHandler.RollbackTasks(ctx, projectID)
 	})
 	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
+		logger.Fatalf(taskFail, err)
 	}
 	defer sub3.Unsubscribe()
 

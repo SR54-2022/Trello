@@ -23,6 +23,11 @@ type TaskRepository struct {
 	tracer trace.Tracer
 }
 
+const (
+	taskSuccess = "Successfully got all tasks"
+	taskUpdate  = "Successfully updated the task"
+)
+
 func New(ctx context.Context, logger *log.Logger, trace trace.Tracer) (*TaskRepository, error) {
 	dburi := os.Getenv("MONGO_DB_URI")
 	if dburi == "" {
@@ -137,7 +142,7 @@ func (tr *TaskRepository) GetAllTask(ctx context.Context) (model.Tasks, error) {
 		tr.logger.Println(err)
 		return nil, err
 	}
-	span.SetStatus(codes.Ok, "Successfully got all tasks")
+	span.SetStatus(codes.Ok, taskSuccess)
 	return tasks, nil
 }
 
@@ -165,7 +170,7 @@ func (tr *TaskRepository) GetDependenciesByTaskId(ctx context.Context, taskID st
 		}
 		tasks = append(tasks, task)
 	}
-	span.SetStatus(codes.Ok, "Successfully got all tasks")
+	span.SetStatus(codes.Ok, taskSuccess)
 	return tasks, tasksCursor.Err()
 }
 
@@ -202,7 +207,7 @@ func (tr *TaskRepository) GetAllByProjectId(ctx context.Context, projectID strin
 		span.SetStatus(codes.Error, err.Error())
 		return tasks, err
 	}
-	span.SetStatus(codes.Ok, "Successfully got all tasks")
+	span.SetStatus(codes.Ok, taskSuccess)
 	return tasks, nil
 
 }
@@ -321,7 +326,7 @@ func (tr *TaskRepository) Update(ctx context.Context, task *model.Task) error {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
-	span.SetStatus(codes.Ok, "Successfully updated the task")
+	span.SetStatus(codes.Ok, taskUpdate)
 	return nil
 }
 
@@ -346,7 +351,7 @@ func (tr *TaskRepository) UpdatePendingDeletion(task *model.Task) error {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
-	span.SetStatus(codes.Ok, "Successfully updated the task")
+	span.SetStatus(codes.Ok, taskUpdate)
 	return nil
 }
 
@@ -499,7 +504,7 @@ func (tr *TaskRepository) UpdateStatus(ctx context.Context, task *model.Task, id
 		span.SetStatus(codes.Error, "no task found")
 		return fmt.Errorf("no task found with the given ID")
 	}
-	span.SetStatus(codes.Ok, "Successfully updated the task")
+	span.SetStatus(codes.Ok, taskUpdate)
 
 	return nil
 }

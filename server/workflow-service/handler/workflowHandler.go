@@ -27,6 +27,15 @@ import (
 
 type KeyProduct struct{}
 
+const (
+	dbErr        = "Database exception: "
+	contentType  = "Content-Type"
+	appJson      = "application/json"
+	internalErr  = "Internal server error"
+	workflowInfo = "WorkflowHandler.HandleProjectDeleted"
+	deleteFail   = "Failed to delete workflows for project %s: %v"
+)
+
 type WorkflowHandler struct {
 	logger     *log.Logger
 	repo       *repository.WorkflowRepo
@@ -69,7 +78,7 @@ func (w *WorkflowHandler) GetAllTasks(rw http.ResponseWriter, h *http.Request) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		w.logger.Print("Database exception: ", err)
+		w.logger.Print(dbErr, err)
 	}
 
 	if tasks == nil {
@@ -107,8 +116,8 @@ func (m *WorkflowHandler) PostTask(rw http.ResponseWriter, h *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		m.custLogger.Error(nil, "Database exception: "+err.Error())
-		m.logger.Print("Database exception: ", err)
+		m.custLogger.Error(nil, dbErr+err.Error())
+		m.logger.Print(dbErr, err)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -132,7 +141,7 @@ func (w *WorkflowHandler) AddTaskAsDependency(rw http.ResponseWriter, h *http.Re
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		w.logger.Print("Database exception: ", err)
+		w.logger.Print(dbErr, err)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -149,7 +158,7 @@ func (w *WorkflowHandler) AddTaskAsDependency(rw http.ResponseWriter, h *http.Re
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentType, appJson)
 
 	client, err := createTLSClient()
 	if err != nil {
@@ -172,8 +181,8 @@ func (w *WorkflowHandler) AddTaskAsDependency(rw http.ResponseWriter, h *http.Re
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		span.RecordError(errors.New("Internal server error"))
-		span.SetStatus(codes.Error, errors.New("Internal server error").Error())
+		span.RecordError(errors.New(internalErr))
+		span.SetStatus(codes.Error, errors.New(internalErr).Error())
 		w.logger.Printf("Task server responded with status: %v", resp.Status)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
@@ -194,7 +203,7 @@ func (w *WorkflowHandler) AddTaskAsDependency(rw http.ResponseWriter, h *http.Re
 		return
 	}
 
-	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set(contentType, appJson)
 
 	client2, err := createTLSClient()
 	if err != nil {
@@ -216,8 +225,8 @@ func (w *WorkflowHandler) AddTaskAsDependency(rw http.ResponseWriter, h *http.Re
 	defer resp2.Body.Close()
 
 	if resp2.StatusCode != http.StatusOK {
-		span.RecordError(errors.New("Internal server error"))
-		span.SetStatus(codes.Error, errors.New("Internal server error").Error())
+		span.RecordError(errors.New(internalErr))
+		span.SetStatus(codes.Error, errors.New(internalErr).Error())
 		w.custLogger.Error(nil, "Failed to call task server for dependency: "+err.Error())
 		w.logger.Printf("Task server responded with status: %v", resp2.Status)
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -233,7 +242,7 @@ func (w *WorkflowHandler) MiddlewareContentTypeSet(next http.Handler) http.Handl
 	return http.HandlerFunc(func(rw http.ResponseWriter, h *http.Request) {
 		w.logger.Println("Method [", h.Method, "] - Hit path :", h.URL.Path)
 
-		rw.Header().Add("Content-Type", "application/json")
+		rw.Header().Add(contentType, appJson)
 
 		next.ServeHTTP(rw, h)
 	})
@@ -331,7 +340,7 @@ func (w *WorkflowHandler) GetTaskGraphByProject(rw http.ResponseWriter, h *http.
 	taskGraph["nodes"] = newNodes
 
 	w.custLogger.Info(nil, "Successfully fetched task graph")
-	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set(contentType, appJson)
 	err = json.NewEncoder(rw).Encode(taskGraph)
 	if err != nil {
 		errMsg := "Error encoding response"
@@ -347,14 +356,14 @@ func (w *WorkflowHandler) GetTaskGraphByProject(rw http.ResponseWriter, h *http.
 }
 
 func (t *WorkflowHandler) HandleProjectDeleted(projectID string) {
-	_, span := t.tracer.Start(context.Background(), "WorkflowHandler.HandleProjectDeleted")
+	_, span := t.tracer.Start(context.Background(), workflowInfo)
 	defer span.End()
 
 	err := t.repo.UpdateAllWorkflowByProjectId(projectID, true)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		t.logger.Printf("Failed to delete workflows for project %s: %v", projectID, err)
+		t.logger.Printf(deleteFail, projectID, err)
 
 		_ = t.nc.Publish("WorkflowsDeletionFailed", []byte(projectID))
 	}
@@ -378,14 +387,14 @@ func (t *WorkflowHandler) HandleProjectDeleted(projectID string) {
 }
 
 func (t *WorkflowHandler) DeletedWorkflows(projectID string) {
-	_, span := t.tracer.Start(context.Background(), "WorkflowHandler.HandleProjectDeleted")
+	_, span := t.tracer.Start(context.Background(), workflowInfo)
 	defer span.End()
 
 	err := t.repo.DeleteAllWorkflowByProjectId(projectID)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		t.logger.Printf("Failed to delete workflows for project %s: %v", projectID, err)
+		t.logger.Printf(deleteFail, projectID, err)
 
 		_ = t.nc.Publish("WorkflowsDeletionFailed", []byte(projectID))
 	}
@@ -400,14 +409,14 @@ func (t *WorkflowHandler) DeletedWorkflows(projectID string) {
 }
 
 func (w *WorkflowHandler) RollbackWorkflows(projectID string) {
-	_, span := w.tracer.Start(context.Background(), "WorkflowHandler.HandleProjectDeleted")
+	_, span := w.tracer.Start(context.Background(), workflowInfo)
 	defer span.End()
 
 	err := w.repo.UpdateAllWorkflowByProjectId(projectID, false)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		w.logger.Printf("Failed to delete workflows for project %s: %v", projectID, err)
+		w.logger.Printf(deleteFail, projectID, err)
 
 		//_ = w.nc.Publish("WorkflowsDeletionFailed", []byte(projectID))
 	}
@@ -423,7 +432,7 @@ func (w *WorkflowHandler) RollbackWorkflows(projectID string) {
 
 func (w *WorkflowHandler) BlockWorkflows(event model.TaskBlockedEvent) {
 
-	_, span := w.tracer.Start(context.Background(), "WorkflowHandler.HandleProjectDeleted")
+	_, span := w.tracer.Start(context.Background(), workflowInfo)
 	defer span.End()
 
 	err := w.repo.BlockWorkflow(event.TaskID, event.Blocked)
