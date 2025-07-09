@@ -23,7 +23,7 @@ services:
       - LINK_TO_TASK_SERVICE=${LINK_TO_TASK_SERVICE}
       - LINK_TO_ANALYTIC_SERVICE=${LINK_TO_ANALYTIC_SERVICE}
     volumes:
-      - ./server/project-service/app.log:/app.log
+      - ./server/project-service/app.log:/app/app.log
       - ./server/project-service/cert.crt:/app/cert.crt
       - ./server/project-service/privat.key:/app/privat.key
     depends_on:
@@ -134,7 +134,7 @@ services:
       - LINK_TO_USER_SERVICE=${LINK_TO_USER_SERVICE}
     env_file: ".env"
     volumes:
-      - ./server/task-service/app.log:/app.log
+      - ./server/task-service/app.log:/app/app.log
       - ./server/task-service/cert.crt:/app/cert.crt
       - ./server/task-service/privat.key:/app/privat.key
     depends_on:
@@ -235,7 +235,7 @@ services:
       - ./server/user-service/10k-worst-passwords.txt:/app/10k-worst-passwords.txt
       - ./server/user-service/cert.crt:/app/cert.crt
       - ./server/user-service/privat.key:/app/privat.key
-      - ./server/user-service/app.log:/app.log
+      - ./server/user-service/app.log:/app/app.log
     networks:
       - network
     deploy:
@@ -349,7 +349,7 @@ services:
       nats:
         condition: service_started
     volumes:
-      - ./server/notification-service/app.log:/app.log
+      - ./server/notification-service/app.log:/app/app.log
       - ./server/notification-service/cert.crt:/app/cert.crt
       - ./server/notification-service/privat.key:/app/privat.key
     networks:
@@ -455,7 +455,7 @@ services:
     volumes:
       - ./server/workflow-service/cert.crt:/app/cert.crt
       - ./server/workflow-service/privat.key:/app/privat.key
-      - ./server/workflow-service/app.log:/app.log
+      - ./server/workflow-service/app.log:/app/app.log
     networks:
       - network
     deploy:
@@ -513,7 +513,7 @@ services:
       - NATS_URL=${NATS_URL}
       - LINK_TO_USER_SERVICE=${LINK_TO_USER_SERVICE}
     volumes:
-      - ./server/analytic-service/app.log:/app.log
+      - ./server/analytic-service/app.log:/app/app.log
       - ./server/analytic-service/cert.crt:/usr/local/share/ca-certificates/cert.crt
       - ./server/analytic-service/privat.key:/app/privat.key
       - ./server/analytic-service/cert.crt:/app/cert.crt

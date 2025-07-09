@@ -101,7 +101,7 @@ func ExtractTraceInfoMiddleware(next http.Handler) http.Handler {
 }
 
 func (p *ProjectsHandler) verifyTokenWithUserService(ctx context.Context, token string) (string, string, error) {
-	ctx, span := p.tracer.Start(ctx, "ProjectsHandler.verifyTokenWithUserService")
+	ctx, span := p.tracer.Start(ctx, "ProjectsHandler.verifyTokenWithUser Service")
 	defer span.End()
 
 	userServiceUrl, err := p.getUserServiceURL()
@@ -128,14 +128,75 @@ func (p *ProjectsHandler) verifyTokenWithUserService(ctx context.Context, token 
 	circuitBreaker := p.createCircuitBreaker()
 	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
 
-	resp, err := p.executeRequestWithRetries(ctx, r, circuitBreaker, cl, req)
+	var userID, role string
+	retryCount := 0
+	deadline, reqHasDeadline := ctx.Deadline()
+	var timeout time.Duration
+
+	err = r.RunCtx(ctx, func(ctx context.Context) error {
+		retryCount++
+		p.logger.Printf("Attempting validate-token request, attempt #%d", retryCount)
+
+		if reqHasDeadline {
+			timeout = time.Until(deadline)
+		}
+
+		_, err := circuitBreaker.Execute(func() (interface{}, error) {
+			if timeout > 0 {
+				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
+			}
+
+			resp, err := cl.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+				return nil, domain.ErrRespTmp{
+					URL:        resp.Request.URL.String(),
+					Method:     resp.Request.Method,
+					StatusCode: resp.StatusCode,
+				}
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
+			}
+
+			var result struct {
+				UserID string `json:"user_id"`
+				Role   string `json:"role"`
+			}
+
+			err = json.NewDecoder(resp.Body).Decode(&result)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			userID = result.UserID
+			role = result.Role
+
+			return result, nil
+		})
+
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return err
+		}
+		return nil
+	})
+
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return "", "", err
 	}
 
-	return p.handleResponse(resp, span)
+	return userID, role, nil
 }
 
 func (p *ProjectsHandler) getUserServiceURL() (string, error) {
@@ -177,63 +238,6 @@ func (p *ProjectsHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
 			return !ok
 		},
 	})
-}
-
-func (p *ProjectsHandler) executeRequestWithRetries(ctx context.Context, r *retrier.Retrier,
-	circuitBreaker *gobreaker.CircuitBreaker, client *http.Client, req *http.Request) (*http.Response, error) {
-	var resp *http.Response
-	err := r.RunCtx(ctx, func(ctx context.Context) error {
-		p.logger.Println("Attempting execute request")
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			resp, err := client.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			return p.checkResponse(resp)
-		})
-		return err
-	})
-	if err != nil {
-		p.logger.Printf("Error during execute request: %v", err)
-		return nil, err
-	}
-
-	return resp, nil
-}
-
-func (p *ProjectsHandler) checkResponse(resp *http.Response) (interface{}, error) {
-	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-		return nil, domain.ErrRespTmp{
-			URL:        resp.Request.URL.String(),
-			Method:     resp.Request.Method,
-			StatusCode: resp.StatusCode,
-		}
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return resp, nil
-}
-
-func (p *ProjectsHandler) handleResponse(resp *http.Response, span trace.Span) (string, string, error) {
-	defer resp.Body.Close()
-
-	var result struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		span.RecordError(err)
-		p.recordError(err, "Error decoding response", span)
-		return "", "", fmt.Errorf("error decoding response: %w", err)
-	}
-
-	p.logger.Printf("ROLE IS %s", result.Role)
-	span.SetStatus(codes.Ok, "Successfully validated token")
-	return result.UserID, result.Role, nil
 }
 
 func (p *ProjectsHandler) recordError(err error, message string, span trace.Span) {

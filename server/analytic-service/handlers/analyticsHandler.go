@@ -20,6 +20,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"strings"
 	"time"
@@ -331,12 +332,75 @@ func (n *AnalyticsHandler) verifyTokenWithUserService(ctx context.Context,
 	circuitBreaker := n.createCircuitBreaker()
 	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
 
-	resp, err := n.executeRequestWithRetries(ctx, r, circuitBreaker, client, req)
+	var userID, role string
+	retryCount := 0
+	deadline, reqHasDeadline := ctx.Deadline()
+	var timeout time.Duration
+
+	err = r.RunCtx(ctx, func(ctx context.Context) error {
+		retryCount++
+		n.logger.Printf("Attempting validate-token request, attempt #%d", retryCount)
+
+		if reqHasDeadline {
+			timeout = time.Until(deadline)
+		}
+
+		_, err := circuitBreaker.Execute(func() (interface{}, error) {
+			if timeout > 0 {
+				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+				return nil, domain.ErrRespTmp{
+					URL:        resp.Request.URL.String(),
+					Method:     resp.Request.Method,
+					StatusCode: resp.StatusCode,
+				}
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
+			}
+
+			var result struct {
+				UserID string `json:"user_id"`
+				Role   string `json:"role"`
+			}
+
+			err = json.NewDecoder(resp.Body).Decode(&result)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			userID = result.UserID
+			role = result.Role
+
+			return result, nil
+		})
+
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return err
+		}
+		return nil
+	})
+
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", "", err
 	}
 
-	return n.handleResponse(resp, span)
+	return userID, role, nil
 }
 
 func (n *AnalyticsHandler) getUserServiceURL() (string, error) {
@@ -377,61 +441,6 @@ func (n *AnalyticsHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
 			return !ok
 		},
 	})
-}
-
-func (n *AnalyticsHandler) executeRequestWithRetries(ctx context.Context, r *retrier.Retrier,
-	circuitBreaker *gobreaker.CircuitBreaker, client *http.Client, req *http.Request) (*http.Response, error) {
-	var resp *http.Response
-	err := r.RunCtx(ctx, func(ctx context.Context) error {
-		n.logger.Printf("Attempting user-service request")
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			resp, err := client.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			return n.checkResponse(resp)
-		})
-		return err
-	})
-
-	if err != nil {
-		n.logger.Printf("Error during user-service request after retries: %v", err)
-		return nil, err
-	}
-
-	return resp, nil
-}
-
-func (n *AnalyticsHandler) checkResponse(resp *http.Response) (interface{}, error) {
-	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-		return nil, domain.ErrRespTmp{
-			URL:        resp.Request.URL.String(),
-			Method:     resp.Request.Method,
-			StatusCode: resp.StatusCode,
-		}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code from user-service: %s", resp.Status)
-	}
-	return resp, nil
-}
-
-func (n *AnalyticsHandler) handleResponse(resp *http.Response, span trace.Span) (string, string, error) {
-	defer resp.Body.Close()
-
-	var result struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		n.recordError(err, "Error decoding response", span)
-		return "", "", err
-	}
-
-	n.logger.Printf("ROLE IS %s", result.Role)
-	span.SetStatus(codes.Ok, "Successfully validated token")
-	return result.UserID, result.Role, nil
 }
 
 func (n *AnalyticsHandler) recordError(err error, message string, span trace.Span) {

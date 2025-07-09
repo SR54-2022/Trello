@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"task--service/client"
 	"task--service/customLogger"
@@ -517,14 +518,74 @@ func (t *TasksHandler) verifyTokenWithUserService(ctx context.Context, token str
 	circuitBreaker := t.createCircuitBreaker()
 	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
 
-	resp, err := t.executeRequestWithRetries(ctx, r, circuitBreaker, cl, req)
+	var userID, role string
+	retryCount := 0
+	deadline, reqHasDeadline := ctx.Deadline()
+	var timeout time.Duration
+
+	err = r.Run(func() error {
+		retryCount++
+		t.logger.Printf("Attempting validate-token request, attempt #%d", retryCount)
+
+		if reqHasDeadline {
+			timeout = time.Until(deadline)
+		}
+
+		_, err = circuitBreaker.Execute(func() (interface{}, error) {
+			if timeout > 0 {
+				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
+			}
+
+			resp, err := cl.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+				return nil, domain.ErrRespTmp{
+					URL:        resp.Request.URL.String(),
+					Method:     resp.Request.Method,
+					StatusCode: resp.StatusCode,
+				}
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
+			}
+
+			var result struct {
+				UserID string `json:"user_id"`
+				Role   string `json:"role"`
+			}
+
+			err = json.NewDecoder(resp.Body).Decode(&result)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				return nil, err
+			}
+
+			userID = result.UserID
+			role = result.Role
+
+			return result, nil
+		})
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return err
+		}
+		return nil
+	})
+
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return "", "", err
 	}
 
-	return t.handleResponse(resp, span)
+	return userID, role, nil
 }
 
 func (t *TasksHandler) getUserServiceURL() (string, error) {
