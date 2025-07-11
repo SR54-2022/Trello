@@ -30,23 +30,32 @@ func initTaskClient() client.TaskClient {
 	return client.NewTaskClient(os.Getenv("TASK_SERVICE_HOST"), os.Getenv("PORT"))
 }
 
-func main() {
-	config := loadConfig()
-
+func setUpNats() string {
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = "nats://nats:4222"
 	}
-	nc, err := nats.Connect(natsURL)
+
+	return natsURL
+}
+
+func deferDrain(nc *nats.Conn) {
+	if err := nc.Drain(); err != nil {
+		log.Printf("Error draining NATS connection: %v", err)
+	}
+	nc.Close()
+}
+
+func main() {
+	config := loadConfig()
+
+	nc, err := nats.Connect(setUpNats())
 	if err != nil {
 		log.Fatalf("Error connecting to NATS: %v", err)
 	}
 	defer nc.Close()
 	defer func() {
-		if err := nc.Drain(); err != nil {
-			log.Printf("Error draining NATS connection: %v", err)
-		}
-		nc.Close()
+		deferDrain(nc)
 	}()
 
 	timeoutContext, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -55,9 +64,7 @@ func main() {
 	logger := log.New(os.Stdout, "[workflow-api] ", log.LstdFlags)
 	cfg := os.Getenv("JAEGER_ADDRESS")
 	exp, err := newExporter(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
+	recordError(logger, err)
 	tp := newTraceProvider(exp)
 	defer func() { _ = tp.Shutdown(timeoutContext) }()
 	otel.SetTracerProvider(tp)
@@ -66,9 +73,7 @@ func main() {
 	custLogger := customLogger.GetLogger()
 
 	store, err := repository.New(logger, custLogger, tracer)
-	if err != nil {
-		logger.Fatal(err)
-	}
+	recordError(logger, err)
 	defer store.CloseDriverConnection(timeoutContext)
 	store.CheckConnection()
 
@@ -80,27 +85,21 @@ func main() {
 		projectID := string(msg.Data)
 		workflowHandler.HandleProjectDeleted(projectID)
 	})
-	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
-	}
+	recordError(logger, err)
 	defer sub.Unsubscribe()
 
 	sub2, err := nc.Subscribe("WorkflowsDeletionComplete", func(msg *nats.Msg) {
 		projectID := string(msg.Data)
 		workflowHandler.DeletedWorkflows(projectID)
 	})
-	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
-	}
+	recordError(logger, err)
 	defer sub2.Unsubscribe()
 	sub3, err := nc.Subscribe("TaskDeletionFailed", func(msg *nats.Msg) {
 		projectID := string(msg.Data)
 		workflowHandler.RollbackWorkflows(projectID)
 		defer cancel()
 	})
-	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
-	}
+	recordError(logger, err)
 	defer sub3.Unsubscribe()
 	sub4, err := nc.Subscribe("TaskBlocked", func(msg *nats.Msg) {
 		var event model.TaskBlockedEvent
@@ -111,16 +110,11 @@ func main() {
 		workflowHandler.BlockWorkflows(event)
 		defer cancel()
 	})
-	if err != nil {
-		logger.Fatalf("Failed to subscribe to ProjectDeleted: %v", err)
-	}
+	recordError(logger, err)
 	defer sub4.Unsubscribe()
 
 	defer func() {
-		if err := nc.Drain(); err != nil {
-			logger.Printf("Error draining NATS connection: %v", err)
-		}
-		nc.Close()
+		deferDrain(nc)
 	}()
 
 	router := mux.NewRouter()
@@ -154,9 +148,7 @@ func main() {
 
 	go func() {
 		err := server.ListenAndServeTLS("/app/cert.crt", "/app/privat.key")
-		if err != nil {
-			logger.Fatal(err)
-		}
+		recordError(logger, err)
 	}()
 
 	sigCh := make(chan os.Signal)
@@ -202,4 +194,10 @@ func newTraceProvider(exp sdktrace.SpanExporter) *sdktrace.TracerProvider {
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithResource(r),
 	)
+}
+
+func recordError(logger *log.Logger, err error) {
+	if err != nil {
+		logger.Fatal(err)
+	}
 }

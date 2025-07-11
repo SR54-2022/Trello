@@ -2,5 +2,5 @@ projectKey=FTNTrello
 serverUrl=http://localhost:9000
 serverVersion=25.6.0.109173
 dashboardUrl=http://localhost:9000/dashboard?id=FTNTrello
-ceTaskId=0db1454d-9028-4216-9295-0bbc61a99ed8
-ceTaskUrl=http://localhost:9000/api/ce/task?id=0db1454d-9028-4216-9295-0bbc61a99ed8
+ceTaskId=3194536d-0550-4f01-93a8-27d8198e49df
+ceTaskUrl=http://localhost:9000/api/ce/task?id=3194536d-0550-4f01-93a8-27d8198e49df

@@ -26,6 +26,13 @@ type WorkflowRepo struct {
 	tracer     trace.Tracer
 }
 
+const (
+	failErr       = "failed to execute update query: %w"
+	noRecords     = "no records updated"
+	successUpdate = "Successfully updated %d workflows for project %s\\n"
+	noWorkflows   = "No workflows updated for project %s\n"
+)
+
 func New(logger *log.Logger, custLogger *customLogger.Logger, tracer trace.Tracer) (*WorkflowRepo, error) {
 	uri := os.Getenv("NEO4J_DB")
 	user := os.Getenv("NEO4J_USERNAME")
@@ -168,55 +175,12 @@ func (wf *WorkflowRepo) GetOne(ctx context.Context, taskID int) (*model.TaskGrap
 	defer session.Close(ctx)
 
 	task, err := session.ExecuteRead(ctx, func(transaction neo4j.ManagedTransaction) (any, error) {
-		query := `
-			MATCH (t:Task {id: $id})
-			OPTIONAL MATCH (t)-[:DEPENDS_ON]->(d:Task)
-			RETURN t.id AS id, t.projectId AS projectId, t.name AS name, 
-			       t.description AS description, t.status AS status, 
-			       t.created_at AS created_at, 
-			       t.updated_at AS updated_at, 
-				   t.user_ids AS user_ids,
-			       collect(d.id) AS dependencies, 
-			       t.blocked AS blocked
-		`
-		params := map[string]any{"id": taskID}
-
-		result, err := transaction.Run(ctx, query, params)
+		t, err := handleQueryTask(taskID, transaction, ctx, span)
 		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
+		return t.(*model.TaskGraph), nil
 
-		if result.Next(ctx) {
-			record := result.Record()
-			dependencies := []string{}
-			if deps, ok := record.Get("dependencies"); ok {
-				for _, dep := range deps.([]any) {
-					dependencies = append(dependencies, dep.(string))
-				}
-			}
-			userIds := []string{}
-			if ids, ok := record.Get("user_ids"); ok && ids != nil {
-				for _, id := range ids.([]any) {
-					userIds = append(userIds, id.(string))
-				}
-			}
-
-			return &model.TaskGraph{
-				ID:           record.Values[0].(string),
-				ProjectID:    record.Values[1].(string),
-				Name:         record.Values[2].(string),
-				Description:  record.Values[3].(string),
-				Status:       model.TaskStatus(record.Values[4].(string)),
-				CreatedAt:    record.Values[5].(time.Time),
-				UpdatedAt:    record.Values[6].(time.Time),
-				UserIds:      userIds,
-				Dependencies: dependencies,
-				Blocked:      record.Values[8].(bool),
-			}, nil
-		}
-		return nil, errors.New("task not found")
 	})
 
 	if err != nil {
@@ -227,6 +191,74 @@ func (wf *WorkflowRepo) GetOne(ctx context.Context, taskID int) (*model.TaskGrap
 	}
 	span.SetStatus(codes.Ok, "")
 	return task.(*model.TaskGraph), nil
+}
+
+func handleQueryTask(taskID int, transaction neo4j.ManagedTransaction, ctx context.Context, span trace.Span) (any, error) {
+	query := `
+			MATCH (t:Task {id: $id})
+			OPTIONAL MATCH (t)-[:DEPENDS_ON]->(d:Task)
+			RETURN t.id AS id, t.projectId AS projectId, t.name AS name, 
+			       t.description AS description, t.status AS status, 
+			       t.created_at AS created_at, 
+			       t.updated_at AS updated_at, 
+				   t.user_ids AS user_ids,
+			       collect(d.id) AS dependencies, 
+			       t.blocked AS blocked
+		`
+	params := map[string]any{"id": taskID}
+	result, err := transaction.Run(ctx, query, params)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	if result.Next(ctx) {
+		return handleResultNext(result)
+	}
+
+	return nil, result.Err()
+}
+
+func handleResultNext(result neo4j.ResultWithContext) (any, error) {
+	record := result.Record()
+	var dependencies []string
+	if deps, ok := record.Get("dependencies"); ok {
+		dependencies = getDependencies(deps)
+	}
+
+	var userIDs []string
+	if ids, ok := record.Get("user_ids"); ok && ids != nil {
+		userIDs = getUserIDs(ids)
+	}
+	return &model.TaskGraph{
+		ID:           record.Values[0].(string),
+		ProjectID:    record.Values[1].(string),
+		Name:         record.Values[2].(string),
+		Description:  record.Values[3].(string),
+		Status:       model.TaskStatus(record.Values[4].(string)),
+		CreatedAt:    record.Values[5].(time.Time),
+		UpdatedAt:    record.Values[6].(time.Time),
+		UserIds:      userIDs,
+		Dependencies: dependencies,
+		Blocked:      record.Values[8].(bool),
+	}, nil
+}
+
+func getDependencies(deps any) []string {
+	var dependencies []string
+	for _, dep := range deps.([]any) {
+		dependencies = append(dependencies, dep.(string))
+	}
+
+	return dependencies
+}
+
+func getUserIDs(ids any) []string {
+	var userIds []string
+	for _, id := range ids.([]any) {
+		userIds = append(userIds, id.(string))
+	}
+	return userIds
 }
 
 func (wf *WorkflowRepo) AddDependency(ctx context.Context, taskID string, dependencyID string) error {
@@ -308,7 +340,23 @@ func (wf *WorkflowRepo) GetTaskGraph(ctx context.Context, projectID string) (map
 	defer session.Close(ctx)
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		query := `
+		return handleQuery(tx, projectID, ctx, span, wf.logger)
+	})
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		wf.logger.Println("Error querying task graph:", err)
+		return nil, err
+	}
+
+	span.SetStatus(codes.Ok, "Successfully retrieved task graph")
+	return result.(map[string]any), nil
+
+}
+
+func handleQuery(tx neo4j.ManagedTransaction, projectID string, ctx context.Context, span trace.Span, logger *log.Logger) (any, error) {
+	query := `
             MATCH (task:Task {projectId: $projectID})
 			OPTIONAL MATCH (task)-[:DEPENDS_ON]->(dep:Task)
 			RETURN 
@@ -323,108 +371,130 @@ func (wf *WorkflowRepo) GetTaskGraph(ctx context.Context, projectID string) (map
     			collect(dep.id) AS dependencies
 
         `
-		params := map[string]any{"projectID": projectID}
-		res, err := tx.Run(ctx, query, params)
-		if err != nil {
-			wf.logger.Println("Query execution failed:", err)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-
-		graph := map[string]any{"nodes": []map[string]any{}, "edges": []map[string]string{}}
-		nodesMap := make(map[string]map[string]any)
-		edgesSet := make(map[string]bool)
-		wf.logger.Println("graph:", graph)
-		for res.Next(ctx) {
-			record := res.Record()
-			taskID, _ := record.Get("id")
-			taskName, _ := record.Get("name")
-			taskDescription, _ := record.Get("description")
-			dependencies, _ := record.Get("dependencies")
-			taskBlocked, _ := record.Get("blocked")
-
-			taskIDStr, ok := taskID.(string)
-			if !ok {
-				wf.logger.Println("Invalid task ID:", taskID)
-				continue
-			}
-			taskCompleteStr, _ := getTaskStatusFromService(taskIDStr)
-			taskNameStr, ok := taskName.(string)
-			if !ok {
-				wf.logger.Println("Invalid task name:", taskName)
-				continue
-			}
-			taskDescriptionStr, ok := taskDescription.(string)
-			if !ok {
-				wf.logger.Println("Invalid task description:", taskDescription)
-				continue
-			}
-			taskComplete := taskCompleteStr == string(model.TaskStatus("Completed"))
-			wf.logger.Println("taskCompleteStr")
-			wf.logger.Println(taskCompleteStr)
-			wf.logger.Println("taskComplete")
-			wf.logger.Println(taskComplete)
-
-			wf.logger.Println("--")
-
-			dependenciesList, _ := dependencies.([]any)
-			if _, exists := nodesMap[taskIDStr]; !exists {
-				nodesMap[taskIDStr] = map[string]any{
-					"id":          taskIDStr,
-					"label":       taskNameStr,
-					"description": taskDescriptionStr,
-					"blocked":     taskBlocked,
-					"isComplete":  taskComplete,
-				}
-			}
-			for _, dep := range dependenciesList {
-				depID, ok := dep.(string)
-				if !ok {
-					wf.logger.Println("Invalid dependency ID:", dep)
-					continue
-				}
-
-				edgeKey := taskIDStr + "->" + depID
-				if !edgesSet[edgeKey] {
-					edgesSet[edgeKey] = true
-					edges, _ := graph["edges"].([]map[string]string)
-					graph["edges"] = append(edges, map[string]string{
-						"from": taskIDStr,
-						"to":   depID,
-					})
-
-				}
-
-			}
-		}
-
-		nodesSlice := make([]map[string]any, 0, len(nodesMap))
-		for _, node := range nodesMap {
-			nodesSlice = append(nodesSlice, node)
-		}
-		graph["nodes"] = nodesSlice
-
-		if err := res.Err(); err != nil {
-			wf.logger.Println("Error in query result:", err)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-
-		return graph, nil
-	})
-
+	params := map[string]any{"projectID": projectID}
+	res, err := tx.Run(ctx, query, params)
 	if err != nil {
+		logger.Println("Query execution failed:", err)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		wf.logger.Println("Error querying task graph:", err)
 		return nil, err
 	}
 
-	span.SetStatus(codes.Ok, "Successfully retrieved task graph")
-	return result.(map[string]any), nil
+	return handleResNext(res, ctx, logger, span)
+}
 
+func handleResNext(res neo4j.ResultWithContext, ctx context.Context, logger *log.Logger, span trace.Span) (any, error) {
+	graph := map[string]any{"nodes": []map[string]any{}, "edges": []map[string]string{}}
+	nodesMap := make(map[string]map[string]any)
+	edgesSet := make(map[string]bool)
+	logger.Println("graph:", graph)
+	for res.Next(ctx) {
+		record := res.Record()
+		taskID, _ := record.Get("id")
+		taskName, _ := record.Get("name")
+		taskDescription, _ := record.Get("description")
+		dependencies, _ := record.Get("dependencies")
+		taskBlocked, _ := record.Get("blocked")
+
+		taskIDStr, ok := taskID.(string)
+		if !ok {
+			logger.Println("Invalid task ID:", taskID)
+			continue
+		}
+		taskCompleteStr, _ := getTaskStatusFromService(taskIDStr)
+		taskNameStr, ok := taskName.(string)
+		if !ok {
+			logger.Println("Invalid task name:", taskName)
+			continue
+		}
+		taskDescriptionStr, ok := taskDescription.(string)
+		if !ok {
+			logger.Println("Invalid task description:", taskDescription)
+			continue
+		}
+		taskComplete := taskCompleteStr == ("Completed")
+		logger.Println("taskCompleteStr")
+		logger.Println(taskCompleteStr)
+		logger.Println("taskComplete")
+		logger.Println(taskComplete)
+
+		logger.Println("--")
+
+		handleTaskDependencies(taskIDStr, taskNameStr, taskDescriptionStr, taskBlocked, taskComplete, dependencies, &nodesMap, &edgesSet, &graph, logger)
+	}
+
+	return handleSlice(graph, logger, span, res, nodesMap)
+
+}
+
+func handleTaskDependencies(
+	taskIDStr string,
+	taskNameStr string,
+	taskDescriptionStr string,
+	taskBlocked any,
+	taskComplete bool,
+	dependencies any,
+	nodesMap *map[string]map[string]any,
+	edgesSet *map[string]bool,
+	graph *map[string]any,
+	logger *log.Logger,
+) {
+	// Process dependencies
+	dependenciesList, ok := dependencies.([]any)
+	if !ok {
+		logger.Println("Invalid dependencies format:", dependencies)
+		return
+	}
+
+	// Add the task to nodesMap if it doesn't exist
+	if _, exists := (*nodesMap)[taskIDStr]; !exists {
+		(*nodesMap)[taskIDStr] = map[string]any{
+			"id":          taskIDStr,
+			"label":       taskNameStr,
+			"description": taskDescriptionStr,
+			"blocked":     taskBlocked,
+			"isComplete":  taskComplete,
+		}
+	}
+
+	// Process each dependency
+	for _, dep := range dependenciesList {
+		depID, ok := dep.(string)
+		if !ok {
+			logger.Println("Invalid dependency ID:", dep)
+			continue
+		}
+		addEdge(taskIDStr, depID, edgesSet, graph)
+	}
+}
+
+func addEdge(taskIDStr string, depID string, edgesSet *map[string]bool, graph *map[string]any) {
+	edgeKey := taskIDStr + "->" + depID
+	if !(*edgesSet)[edgeKey] {
+		(*edgesSet)[edgeKey] = true
+		edges, _ := (*graph)["edges"].([]map[string]string)
+		(*graph)["edges"] = append(edges, map[string]string{
+			"from": taskIDStr,
+			"to":   depID,
+		})
+	}
+}
+
+func handleSlice(graph map[string]any, logger *log.Logger, span trace.Span, res neo4j.ResultWithContext, nodesMap map[string]map[string]any) (any, error) {
+	nodesSlice := make([]map[string]any, 0, len(nodesMap))
+	for _, node := range nodesMap {
+		nodesSlice = append(nodesSlice, node)
+	}
+	graph["nodes"] = nodesSlice
+
+	if err := res.Err(); err != nil {
+		logger.Println("Error in query result:", err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return graph, nil
 }
 
 func getTaskStatusFromService(taskID string) (string, error) {
@@ -486,121 +556,6 @@ func createTLSClient() (*http.Client, error) {
 	return client, nil
 }
 
-func (wf *WorkflowRepo) GetTaskGraphOld(ctx context.Context, projectID string) (map[string]any, error) {
-	ctx, span := wf.tracer.Start(ctx, "WorkflowRepo.GetTaskGraph")
-	defer span.End()
-	session := wf.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
-	defer session.Close(ctx)
-
-	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		query := `
-            MATCH (task:Task {projectId: $projectID})
-			OPTIONAL MATCH (task)-[:DEPENDS_ON]->(dep:Task)
-			RETURN 
-			    task.id AS id,
-    			task.name AS name,
-    			task.description AS description,
-    			task.status AS status,
-    			task.blocked AS blocked,
-    			task.user_ids AS user_ids,
-    			task.created_at AS created_at,
-    			task.updated_at AS updated_at,
-    			collect(dep.id) AS dependencies
-
-        `
-		params := map[string]any{"projectID": projectID}
-		res, err := tx.Run(ctx, query, params)
-		if err != nil {
-			wf.logger.Println("Query execution failed:", err)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-
-		graph := map[string]any{"nodes": []map[string]any{}, "edges": []map[string]string{}}
-		nodesMap := make(map[string]map[string]any)
-		edgesSet := make(map[string]bool)
-		wf.logger.Println("graph:", graph)
-		for res.Next(ctx) {
-			record := res.Record()
-			taskID, _ := record.Get("id")
-			taskName, _ := record.Get("name")
-			taskDescription, _ := record.Get("description")
-			dependencies, _ := record.Get("dependencies")
-
-			taskIDStr, ok := taskID.(string)
-			if !ok {
-				wf.logger.Println("Invalid task ID:", taskID)
-				continue
-			}
-			taskNameStr, ok := taskName.(string)
-			if !ok {
-				wf.logger.Println("Invalid task name:", taskName)
-				continue
-			}
-			taskDescriptionStr, ok := taskDescription.(string)
-			if !ok {
-				wf.logger.Println("Invalid task description:", taskDescription)
-				continue
-			}
-
-			dependenciesList, _ := dependencies.([]any)
-			if _, exists := nodesMap[taskIDStr]; !exists {
-				nodesMap[taskIDStr] = map[string]any{
-					"id":          taskIDStr,
-					"label":       taskNameStr,
-					"description": taskDescriptionStr,
-				}
-			}
-			for _, dep := range dependenciesList {
-				depID, ok := dep.(string)
-				if !ok {
-					wf.logger.Println("Invalid dependency ID:", dep)
-					continue
-				}
-
-				edgeKey := taskIDStr + "->" + depID
-				if !edgesSet[edgeKey] {
-					edgesSet[edgeKey] = true
-					edges, _ := graph["edges"].([]map[string]string)
-					graph["edges"] = append(edges, map[string]string{
-						"from": taskIDStr,
-						"to":   depID,
-					})
-
-				}
-
-			}
-		}
-
-		nodesSlice := make([]map[string]any, 0, len(nodesMap))
-		for _, node := range nodesMap {
-			nodesSlice = append(nodesSlice, node)
-		}
-		graph["nodes"] = nodesSlice
-
-		if err := res.Err(); err != nil {
-			wf.logger.Println("Error in query result:", err)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-
-		return graph, nil
-	})
-
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		wf.logger.Println("Error querying task graph:", err)
-		return nil, err
-	}
-
-	span.SetStatus(codes.Ok, "Successfully retrieved task graph")
-	return result.(map[string]any), nil
-
-}
-
 func (w *WorkflowRepo) UpdateAllWorkflowByProjectId(projectID string, toDelete bool) error {
 
 	query := `
@@ -621,22 +576,22 @@ func (w *WorkflowRepo) UpdateAllWorkflowByProjectId(projectID string, toDelete b
 			"updatedAt": updatedAt,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute update query: %w", err)
+			return nil, fmt.Errorf(failErr, err)
 		}
 
 		if res.Next(ctx) {
 			return res.Record().Values[0], nil
 		}
-		return nil, fmt.Errorf("no records updated")
+		return nil, fmt.Errorf(noRecords)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update workflows for project %s: %w", projectID, err)
 	}
 	updatedCount, ok := result.(int64)
 	if ok && updatedCount > 0 {
-		fmt.Printf("Successfully updated %d workflows for project %s\n", updatedCount, projectID)
+		fmt.Printf(successUpdate, updatedCount, projectID)
 	} else {
-		fmt.Printf("No workflows updated for project %s\n", projectID)
+		fmt.Printf(noWorkflows, projectID)
 	}
 
 	return nil
@@ -658,22 +613,22 @@ func (w *WorkflowRepo) DeleteAllWorkflowByProjectId(projectID string) error {
 			"projectID": projectID,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute update query: %w", err)
+			return nil, fmt.Errorf(failErr, err)
 		}
 
 		if res.Next(ctx) {
 			return res.Record().Values[0], nil
 		}
-		return nil, fmt.Errorf("no records updated")
+		return nil, fmt.Errorf(noRecords)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update workflows for project %s: %w", projectID, err)
 	}
 	deletedCount, ok := result.(int64)
 	if ok && deletedCount > 0 {
-		fmt.Printf("Successfully updated %d workflows for project %s\n", deletedCount, projectID)
+		fmt.Printf(successUpdate, deletedCount, projectID)
 	} else {
-		fmt.Printf("No workflows updated for project %s\n", projectID)
+		fmt.Printf(noWorkflows, projectID)
 	}
 
 	return nil
@@ -693,22 +648,22 @@ func (w *WorkflowRepo) BlockWorkflow(taskId string, blocked bool) error {
 			"updated_at": updatedAt,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute update query: %w", err)
+			return nil, fmt.Errorf(failErr, err)
 		}
 
 		if res.Next(ctx) {
 			return res.Record().Values[0], nil
 		}
-		return nil, fmt.Errorf("no records updated")
+		return nil, fmt.Errorf(noRecords)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update blocked flag in workflow with taskId %s: %w", taskId, err)
 	}
 	updatedCount, ok := result.(int64)
 	if ok && updatedCount > 0 {
-		fmt.Printf("Successfully updated %d workflows for project %s\n", updatedCount, taskId)
+		fmt.Printf(successUpdate, updatedCount, taskId)
 	} else {
-		fmt.Printf("No workflows updated for project %s\n", taskId)
+		fmt.Printf(noWorkflows, taskId)
 	}
 
 	return nil
