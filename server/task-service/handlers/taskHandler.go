@@ -66,6 +66,22 @@ const (
 	missingId      = "User ID is missing or invalid"
 )
 
+type RequestContext struct {
+	UserID         *string
+	Role           *string
+	RetryCount     int
+	Deadline       time.Time
+	ReqHasDeadline bool
+}
+
+type Config struct {
+	Timeout        time.Duration
+	Logger         *log.Logger
+	CircuitBreaker *gobreaker.CircuitBreaker
+	Client         *http.Client
+	span           trace.Span
+}
+
 func NewTasksHandler(l *log.Logger, r *repositories.TaskRepository, docRepo *repositories.TaskDocumentRepository, natsConn *nats.Conn, tracer trace.Tracer, userClient client.UserClient, custLogger *customLogger.Logger) *TasksHandler {
 	return &TasksHandler{
 		logger:       l,
@@ -496,96 +512,119 @@ func (t *TasksHandler) verifyTokenWithUserService(ctx context.Context, token str
 
 	userServiceUrl, err := t.getUserServiceURL()
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", "", err
+		return t.recordSpanError(span, err)
 	}
 
 	req, err := t.createRequest(ctx, userServiceUrl, token, span)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", "", err
+		return t.recordSpanError(span, err)
 	}
 
 	cl, err := createTLSClient()
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", "", err
+		return t.recordSpanError(span, err)
 	}
 
 	circuitBreaker := t.createCircuitBreaker()
 	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
-
-	var userID, role string
 	retryCount := 0
-	deadline, reqHasDeadline := ctx.Deadline()
-	var timeout time.Duration
 
-	err = r.Run(func() error {
-		retryCount++
-		t.logger.Printf("Attempting validate-token request, attempt #%d", retryCount)
-
-		if reqHasDeadline {
-			timeout = time.Until(deadline)
-		}
-
-		_, err = circuitBreaker.Execute(func() (interface{}, error) {
-			if timeout > 0 {
-				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
-			}
-
-			resp, err := cl.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-				return nil, domain.ErrRespTmp{
-					URL:        resp.Request.URL.String(),
-					Method:     resp.Request.Method,
-					StatusCode: resp.StatusCode,
-				}
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
-			}
-
-			var result struct {
-				UserID string `json:"user_id"`
-				Role   string `json:"role"`
-			}
-
-			err = json.NewDecoder(resp.Body).Decode(&result)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			userID = result.UserID
-			role = result.Role
-
-			return result, nil
-		})
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return err
-		}
-		return nil
-	})
-
+	userID, role, err := t.executeWithRetry(ctx, cl, req, circuitBreaker, r, &retryCount, span)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
 		return "", "", err
 	}
 
 	return userID, role, nil
+}
+
+func (t *TasksHandler) recordSpanError(span trace.Span, err error) (string, string, error) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	return "", "", err
+}
+
+func (t *TasksHandler) executeWithRetry(
+	ctx context.Context,
+	cl *http.Client,
+	req *http.Request,
+	cb *gobreaker.CircuitBreaker,
+	r *retrier.Retrier,
+	retryCount *int,
+	span trace.Span,
+) (string, string, error) {
+	var userID, role string
+
+	deadline, hasDeadline := ctx.Deadline()
+
+	err := r.RunCtx(ctx, func(ctx context.Context) error {
+		*retryCount++
+		t.logger.Printf("Attempting validate-token request, attempt #%d", *retryCount)
+
+		timeout := t.getTimeout(deadline, hasDeadline)
+		if timeout > 0 {
+			req.Header.Set("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
+		}
+
+		_, err := cb.Execute(func() (interface{}, error) {
+			return t.doRequest(cl, req, &userID, &role, span)
+		})
+
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		return err
+	})
+
+	return userID, role, err
+}
+
+func (t *TasksHandler) getTimeout(deadline time.Time, hasDeadline bool) time.Duration {
+	if hasDeadline {
+		return time.Until(deadline)
+	}
+	return 0
+}
+
+func (t *TasksHandler) doRequest(
+	cl *http.Client,
+	req *http.Request,
+	userID *string,
+	role *string,
+	span trace.Span,
+) (interface{}, error) {
+	resp, err := cl.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return nil, domain.ErrRespTmp{
+			URL:        resp.Request.URL.String(),
+			Method:     resp.Request.Method,
+			StatusCode: resp.StatusCode,
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
+	}
+
+	var result struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	*userID = result.UserID
+	*role = result.Role
+	return result, nil
 }
 
 func (t *TasksHandler) getUserServiceURL() (string, error) {
