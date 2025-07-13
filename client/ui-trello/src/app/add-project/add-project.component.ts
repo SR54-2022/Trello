@@ -1,15 +1,14 @@
 import {Component, OnInit} from '@angular/core';
-import {FormBuilder, FormGroup, Validators} from "@angular/forms";
+import {FormBuilder, FormGroup, Validators, ReactiveFormsModule} from "@angular/forms";
 import {ToastrService} from "ngx-toastr";
 import {Project} from "../models/project.model";
 import {ProjectServiceService} from "../services/project-service.service";
-import {ReactiveFormsModule} from '@angular/forms';
 import {HttpClient} from "@angular/common/http";
 import {animate, state, style, transition, trigger} from "@angular/animations";
 import {CommonModule} from '@angular/common';
-import {Route, Router} from "@angular/router";
+import {Router} from "@angular/router";
 import {dateValidator} from "../validator/date-validator";
-import {AppModule} from "../app.module";
+
 import {MenuComponent} from "../menu/menu.component";
 import {AccountService} from "../services/account.service";
 import {DeleteService} from "../services/delete.service";

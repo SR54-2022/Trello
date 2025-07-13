@@ -30,7 +30,7 @@ export class ProjectHistoryComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.projectID = this.route.snapshot.paramMap.get('projectId') || '';
+    this.projectID = this.route.snapshot.paramMap.get('projectId') ?? '';
     if (this.projectID) {
       this.loadProjectDetails(this.projectID)
       this.loadEvents();
@@ -38,10 +38,15 @@ export class ProjectHistoryComponent implements OnInit {
   }
 
   loadEvents(): void {
-    this.eventService.getEvents(this.projectID).subscribe(
-      (data) => (this.events = data.reverse()),
-      (error) => console.error('Error fetching events:', error)
-    );
+    this.eventService.getEvents(this.projectID).subscribe({
+      next: (data) => {
+        this.events = data.reverse();
+      },
+      error: (err) => {
+        console.error('Error fetching events:', err);
+      }
+    })
+
   }
 
   generateReadableMessage(eventData: EventData): string {

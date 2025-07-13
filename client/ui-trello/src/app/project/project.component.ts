@@ -5,12 +5,12 @@ import {ActivatedRoute, Router} from "@angular/router";
 import {TaskDetails} from "../models/taskDetails";
 import {Task, TaskStatus} from "../models/task";
 import {TaskService} from "../services/task.service";
-import {Account} from "../models/account.model";
+
 import {UserDetails} from "../models/userDetails";
 import {HttpClient, HttpHeaders} from "@angular/common/http";
 import {ToastrService} from "ngx-toastr";
 import {TaskDocumentDetails} from "../models/taskDocumentDetails.model";
-import {TaskNode} from "../models/task-graph";
+
 import { CdkDragDrop, transferArrayItem } from '@angular/cdk/drag-drop';
 import {GraphEditorComponent} from "../graph-editor/graph-editor.component";
 
@@ -143,9 +143,9 @@ export class ProjectComponent implements OnInit {
       console.log(this.selectedTask.userIds);
       console.log(this.selectedTask.user_ids);
 
-      this.taskMembers[task.id] = task.user_ids.map(userId =>
-        this.allUsers.find(user => user.id === userId)
-      ).filter(user => user !== undefined) as UserDetails[];
+      this.taskMembers[task.id] = task.user_ids
+        .map(userId => this.allUsers.find(user => user.id === userId))
+        .filter((user): user is UserDetails => user !== undefined);
 
       this.filteredUsers[task.id] = this.allUsers.filter(user =>
         !this.taskMembers[task.id].some(member => member.id === user.id)
@@ -254,16 +254,16 @@ export class ProjectComponent implements OnInit {
       };
       console.log(task);
       // Poziv servisa sa konvertovanim objektom
-      this.taskService.checkIfUserInTask(task).subscribe(
-        (response: boolean) => {
+      this.taskService.checkIfUserInTask(task).subscribe({
+        next: (response: boolean) => {
           this.isUserInTask = response;
           console.log(this.isUserInTask);
           console.log('User is in task:', response);
         },
-        (error) => {
-          console.error('Error checking user in task:', error);
+        error: err => {
+          console.error('Error checking user in task:', err);
         }
-      );
+      });
     } else {
       console.warn('No task selected for user check.');
       this.isUserInTask = false;
@@ -418,31 +418,7 @@ export class ProjectComponent implements OnInit {
     this.router.navigate(['/analytics/' + projectId]);
   }
 
-  // onFileSelected1(event: Event): void {
-  //   const input = event.target as HTMLInputElement;
-  //
-  //   if (input.files && input.files.length > 0) {
-  //     const file = input.files[0];
-  //     console.log('Izabran fajl:', file.name);
-  //
-  //   }
-  // }
-  // onFileSelected(event: Event, taskId: string): void {
-  //   const input = event.target as HTMLInputElement;
-  //
-  //   if (input.files && input.files.length > 0) {
-  //     const file = input.files[0];
-  //
-  //     this.taskService.uploadTaskDocument(taskId, file).subscribe(
-  //       (response) => {
-  //         console.log('Upload successful:', response);
-  //       },
-  //       (error) => {
-  //         console.error('Error uploading file:', error);
-  //       }
-  //     );
-  //   }
-  // }
+
 
   selectedFile: File | null = null;
 
@@ -464,32 +440,34 @@ export class ProjectComponent implements OnInit {
     }
     const taskId = this.selectedTask?.id!;
 
-    this.taskService.uploadTaskDocument(taskId, this.selectedFile).subscribe(
-      (response) => {
-        console.log('Fajl uspešno poslat:', response);
+    this.taskService.uploadTaskDocument(taskId, this.selectedFile).subscribe({
+      next: (response) => {
+        console.log('File sent successfully:', response);
 
-        this.selectedFile = null; // Resetovanje fajla nakon slanja
+        this.selectedFile = null;
       },
-      (error) => {
-        console.error('Greška prilikom slanja fajla:', error);
+      error: err => {
+        console.error('Error while sending the file:', err);
 
         this.selectedFile = null;
         this.getTaskDocumentsForTask();
       }
-    );
+    })
+
+
   }
 
   getTaskDocumentsForTask(): void {
     if (this.selectedTask) {
-      this.taskService.getAllDocumentsForThisTask(this.selectedTask.id).subscribe(
-        (response: TaskDocumentDetails[]) => {
+      this.taskService.getAllDocumentsForThisTask(this.selectedTask.id).subscribe({
+        next: (response: TaskDocumentDetails[]) => {
           this.taskDocumentDetails = response;
           console.log('Task documents:', this.taskDocumentDetails);
         },
-        (error) => {
+        error: (error) => {
           console.error('Error fetching task documents:', error);
         }
-      );
+      })
     } else {
       console.warn('No task ID selected for fetching documents.');
     }
@@ -583,7 +561,7 @@ export class ProjectComponent implements OnInit {
 
 
       if (newStatus && draggedTask.status !== newStatus) {
-        if(draggedTask.blocked == true){
+        if(draggedTask.blocked){
           this.toastr.error("Cannot change status: This Task is blocked.");
           return;
         }
@@ -610,6 +588,13 @@ export class ProjectComponent implements OnInit {
     return this.tasks.filter(task =>
       task.id !== this.selectedTask!.id && !allDependencies.some(dep => dep.id === task.id)
     );
+  }
+
+  handleKeyDown(event: KeyboardEvent, doc: any) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      this.downloadFile(doc);
+    }
   }
 }
 

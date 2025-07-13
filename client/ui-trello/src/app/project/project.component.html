@@ -120,6 +120,8 @@
             alt="Download"
             class="download-icon"
             (click)="downloadFile(doc)"
+            (keydown)="handleKeyDown($event, doc)"
+            tabindex="0"
           />
         </li>
       </ul>
