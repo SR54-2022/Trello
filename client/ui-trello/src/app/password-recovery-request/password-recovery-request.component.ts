@@ -10,7 +10,7 @@ import {ToastrService} from "ngx-toastr";
 export class PasswordRecoveryRequestComponent {
   email: string = '';
 
-  constructor(private accountService: AccountService, private toastr: ToastrService) {}
+  constructor(private readonly accountService: AccountService, private readonly toastr: ToastrService) {}
 
   requestPasswordReset() {
     this.accountService.requestPasswordReset(this.email).subscribe({

@@ -35,10 +35,10 @@ export class MemberAdditionComponent implements OnInit {
   managerId: string = "";
 
   constructor(
-    private projectService: ProjectServiceService,
-    private route: ActivatedRoute,
-    private accountService: AccountService,
-    private router: Router
+    private readonly projectService: ProjectServiceService,
+    private readonly route: ActivatedRoute,
+    private readonly accountService: AccountService,
+    private readonly router: Router
   ) {}
 
   ngOnInit() {

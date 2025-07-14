@@ -12,7 +12,7 @@ export class MagicLinkComponent implements OnInit {
   loading: boolean = true;
   linkValid: boolean = false;
 
-  constructor(private service: AccountService, private toastr: ToastrService, private router: Router, private route: ActivatedRoute) {
+  constructor(private readonly service: AccountService, private readonly toastr: ToastrService, private readonly router: Router, private readonly route: ActivatedRoute) {
   }
 
   resendLink() {

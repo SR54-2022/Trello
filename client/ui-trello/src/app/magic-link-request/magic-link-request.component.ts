@@ -10,7 +10,7 @@ import {ToastrService} from "ngx-toastr";
 export class MagicLinkRequestComponent {
   email!: string;
 
-  constructor(private service: AccountService, private toastr: ToastrService) {
+  constructor(private readonly service: AccountService, private readonly toastr: ToastrService) {
   }
 
   requestMagicLink() {

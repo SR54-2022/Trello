@@ -22,10 +22,10 @@ export class PasswordResetComponent implements OnInit {
   };
 
   constructor(
-    private route: ActivatedRoute,
-    private accountService: AccountService,
-    private toastr: ToastrService,
-    private router: Router
+    private readonly route: ActivatedRoute,
+    private readonly accountService: AccountService,
+    private readonly toastr: ToastrService,
+    private readonly router: Router
   ) {}
 
   ngOnInit(): void {
