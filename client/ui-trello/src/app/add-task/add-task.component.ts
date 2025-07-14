@@ -33,15 +33,14 @@ export class AddTaskComponent implements OnInit {
   searchTerm: string = '';
   taskMembers: { [taskId: string]: User[] } = {};
 
-
   constructor(
-    private fb: FormBuilder,
-    private route: ActivatedRoute,
-    private taskService: TaskService,
-    private http: HttpClient,
-    private toastr: ToastrService,
-    private accountService: AccountService,
-    private projectService: ProjectServiceService
+    private readonly  fb: FormBuilder,
+    private readonly route: ActivatedRoute,
+    private readonly  taskService: TaskService,
+    private readonly  http: HttpClient,
+    private readonly  toastr: ToastrService,
+    private readonly  accountService: AccountService,
+    private readonly  projectService: ProjectServiceService
   ) {
   }
 
@@ -95,12 +94,13 @@ export class AddTaskComponent implements OnInit {
     });
   }
 
-  filterUsers(taskId: string) {
-    this.filteredUsers[taskId] = this.allUsers
-      .filter(user => user.email.toLowerCase().includes(this.searchTerm.toLowerCase()))
-      .filter(user => {
-        return !this.taskMembers[taskId]?.some(member => member.id === user.id);
-      });
+  filterUsers(taskId: string): void {
+    const term = this.searchTerm.toLowerCase();
+    const currentMembers = this.taskMembers[taskId] ?? [];
+    this.filteredUsers[taskId] = this.allUsers.filter(user =>
+      user.email.toLowerCase().includes(term) &&
+      !currentMembers.some(member => member.id === user.id)
+    );
   }
 
 

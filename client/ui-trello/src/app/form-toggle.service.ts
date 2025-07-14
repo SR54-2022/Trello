@@ -7,7 +7,7 @@ import {BehaviorSubject} from "rxjs";
 export class FormToggleService {
 
 
-  private showFormSubject = new BehaviorSubject<boolean>(false);
+  private readonly showFormSubject = new BehaviorSubject<boolean>(false);
   showForm$ = this.showFormSubject.asObservable();
 
   toggleForm(): void {

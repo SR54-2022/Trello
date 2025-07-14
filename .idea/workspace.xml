@@ -7,6 +7,23 @@
     <list default="true" id="179c32f3-1c18-4755-b752-5616defba046" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.scannerwork/report-task.txt" beforeDir="false" afterPath="$PROJECT_DIR$/.scannerwork/report-task.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/api-gateway/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/api-gateway/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.scss" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.scss" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/app.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/app.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/change-password/change-password.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/change-password/change-password.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/form-toggle.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/form-toggle.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/graph-editor/graph-editor.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/graph-editor/graph-editor.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/member-addition/member-addition.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/member-addition/member-addition.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,7 +67,8 @@
     "last_opened_file_path": "/home/stefan",
     "node.js.detected.package.eslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm"
+    "nodejs_package_manager_path": "npm",
+    "ts.external.directory.path": "/home/stefan/Desktop/Trello/client/ui-trello/node_modules/typescript/lib"
   }
 }]]></component>
   <component name="SharedIndexes">

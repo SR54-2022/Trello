@@ -55,15 +55,15 @@ export class AddProjectComponent implements OnInit {
   }
 
   constructor(
-    private formBuilder: FormBuilder,
-    private projectService: ProjectServiceService,
-    private toaster: ToastrService,
-    private http: HttpClient,
-    private router: Router,
-    private accService: AccountService,
-    private deleteService: DeleteService,
-    private toastr: ToastrService,
-    private formToggleService: FormToggleService,
+    private readonly formBuilder: FormBuilder,
+    private readonly projectService: ProjectServiceService,
+    private readonly toaster: ToastrService,
+    private readonly http: HttpClient,
+    private readonly router: Router,
+    private readonly accService: AccountService,
+    private readonly deleteService: DeleteService,
+    private readonly toastr: ToastrService,
+    private readonly formToggleService: FormToggleService,
   ) { }
 
   ngOnInit(): void {

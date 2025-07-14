@@ -1,5 +1,3 @@
-// graph-editor.component.ts
-
 import { Component, ElementRef, Input, OnInit } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { GraphService } from "../services/graph.service";
@@ -27,7 +25,7 @@ export class GraphEditorComponent implements OnInit {
   links: Edge[] = [];
   @Input() projectId!: string;
 
-  constructor(private http: HttpClient, private elRef: ElementRef, private graphService: GraphService) {}
+  constructor(private readonly http: HttpClient, private readonly elRef: ElementRef, private readonly graphService: GraphService) {}
 
   ngOnInit() {
     this.fetchData();

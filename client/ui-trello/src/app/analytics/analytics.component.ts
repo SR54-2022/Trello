@@ -51,9 +51,9 @@ export class AnalyticsComponent implements OnInit {
   userMap: Map<string, string> = new Map(); // Map user ID to user name
 
   constructor(
-    private eventService: AnalyticsService,
-    private route: ActivatedRoute,
-    private projectService: ProjectServiceService
+    private readonly eventService: AnalyticsService,
+    private readonly route: ActivatedRoute,
+    private readonly projectService: ProjectServiceService
   ) {}
 
   ngOnInit(): void {
@@ -65,20 +65,21 @@ export class AnalyticsComponent implements OnInit {
   }
 
   loadAnalytics(): void {
-
     this.eventService.getAnalytics(this.projectID).subscribe({
       next: (data: Analytics) => {
         this.analytics = data;
-        this.analytics.project_on_schedule =
-          this.analytics.project_on_schedule == null
-            ? 'Project is not finished yet.'
-            : (this.analytics.project_on_schedule ? 'The project is finished on schedule.' : 'The project is not finished on time, the estimated completion date is exceeded.');
+        if (this.analytics.project_on_schedule == null) {
+          this.analytics.project_on_schedule = 'Project is not finished yet.';
+        } else if (this.analytics.project_on_schedule) {
+          this.analytics.project_on_schedule = 'The project is finished on schedule.';
+        } else {
+          this.analytics.project_on_schedule = 'The project is not finished on time, the estimated completion date is exceeded.';
+        }
       },
       error: error => {
         console.error('Error fetching analytics:', error);
       }
-    })
-
+    });
   }
 
   loadProjectDetails(projectId: string): void {

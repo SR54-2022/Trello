@@ -12,7 +12,9 @@ COPY ./privat.key /etc/nginx/ssl/privat.key
 RUN rm /etc/nginx/conf.d/default.conf
 
 # Update apt-get and install unzip for handling the OpenTelemetry SDK
-RUN apt-get update && apt-get install -y unzip
+RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list \
+ && sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list \
+ && apt-get update && apt-get install -y unzip && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Download and extract the OpenTelemetry WebServer SDK for NGINX 1.18
 ADD https://github.com/open-telemetry/opentelemetry-cpp-contrib/releases/download/webserver%2Fv1.0.0/opentelemetry-webserver-sdk-x64-linux.tgz.zip /opt

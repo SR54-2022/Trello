@@ -13,7 +13,7 @@ export class ChangePasswordComponent {
   repeatNewPassword!: string;
   showPassword: boolean = false;
 
-  constructor(private toastr: ToastrService, private accountService: AccountService) {
+  constructor(private readonly toastr: ToastrService, private readonly accountService: AccountService) {
   }
 
   passwordValidation = {
@@ -24,7 +24,7 @@ export class ChangePasswordComponent {
     specialChar: false,
   };
 
-  private passwordRegex = {
+  private readonly passwordRegex = {
     length: /.{8,}/,
     uppercase: /[A-Z]/,
     lowercase: /[a-z]/,

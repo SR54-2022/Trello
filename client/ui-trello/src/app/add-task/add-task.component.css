@@ -5,7 +5,7 @@
 }
 
 .task-card {
-  background-color: var(--shadow--white); /*#f9f9f9;*/
+  background-color: var(--shadow--white);
   border-radius: 8px;
   padding: 20px;
   width: 100%;
@@ -65,7 +65,6 @@ select {
   border-radius: 4px;
 }
 
-/* Container styling for adding/removing users */
 .user-management {
   margin-top: 20px;
   padding: 10px;

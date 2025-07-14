@@ -21,10 +21,10 @@ export class LoginComponent implements OnInit {
   captchaResetTimeout: any;
 
   constructor(
-    private formBuilder: FormBuilder,
-    private accountService: AccountService,
-    private toastr: ToastrService,
-    private router: Router
+    private readonly formBuilder: FormBuilder,
+    private readonly accountService: AccountService,
+    private readonly toastr: ToastrService,
+    private readonly router: Router
   ) {}
 
   ngOnInit(): void {

@@ -1,50 +1,8 @@
-<!--<app-menu></app-menu>-->
-<!--<h1 style="text-align: center; color: #96a0e3">{{ project?.name | uppercase }}</h1>-->
-<!--<p style="text-align: center;">Min Members: {{ minMembers }}</p>-->
-<!--<p style="text-align: center;">Max Members: {{ maxMembers }}</p>-->
-<!--<div class="container mt-4">-->
-<!--  <div class="row">-->
-<!--    <div class="col-md-12">-->
-<!--      &lt;!&ndash; All Users first &ndash;&gt;-->
-<!--      <div class="available-users border rounded p-3 mb-4">-->
-<!--        <h3 style="text-align: center">All Users</h3>-->
-<!--        <div class="search-bar mb-3">-->
-<!--          <input-->
-<!--            type="text"-->
-<!--            class="form-control"-->
-<!--            placeholder="Search for users..."-->
-<!--            [(ngModel)]="searchTerm"-->
-<!--            (input)="filterUsers()"-->
-<!--          />-->
-<!--        </div>-->
-<!--        <div *ngFor="let user of filteredUsers" class="user bg-light border rounded mb-2 p-2">-->
-<!--          {{ user.email }}-->
-<!--          <button-->
-<!--            class="btn btn-primary btn-sm float-end"-->
-<!--            (click)="addMember(user)"-->
-<!--            [disabled]="isFull() || isUserAssigned(user)"-->
-<!--          >-->
-<!--            Assign-->
-<!--          </button>-->
-<!--        </div>-->
-<!--      </div>-->
-
-<!--      &lt;!&ndash; Project Members second &ndash;&gt;-->
-<!--      <div class="project-members border rounded p-3">-->
-<!--        <h4 style="text-align: center; color: #1f203c">Project Members</h4>-->
-<!--        <div *ngFor="let member of projectMembers" class="user bg-light border rounded mb-2 p-2">-->
-<!--          {{ member.email }}-->
-<!--          <button class="btn btn-danger btn-sm float-end remove-btn" (click)="removeMember(member.id)">Remove</button>-->
-<!--        </div>-->
-<!--      </div>-->
-<!--    </div>-->
-<!--  </div>-->
-<!--</div>-->
 
 <div class="container mt-4">
   <div class="row">
     <div class="col-md-12">
-      <!-- All Users section -->
+
       <div class="available-users border rounded p-3 mb-4">
         <h3 style="text-align: center">All Users</h3>
         <div class="search-bar mb-3">
@@ -68,7 +26,6 @@
         </div>
       </div>
 
-      <!-- Project Members section -->
       <div class="project-members border rounded p-3">
         <h4 style="text-align: center; color: #1f203c">Project Members</h4>
         <div *ngFor="let member of projectMembers" class="user">
@@ -79,7 +36,3 @@
     </div>
   </div>
 </div>
-
-<!--<button class="btn btn-success mb-3" (click)="addNewProject()">Add new project</button>-->
-<!--<br>-->
-<!--<button class="btn btn-success mb-3" (click)="addNewTask(projectId)">Add new task for this project</button>-->

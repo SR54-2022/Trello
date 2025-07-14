@@ -9,7 +9,7 @@ import {AccountService} from "./services/account.service";
 export class AppComponent implements OnDestroy, OnInit {
   title = 'ui-trello';
 
-  constructor(private accountService: AccountService) {}
+  constructor(private readonly accountService: AccountService) {}
 
   ngOnInit() {
     console.log('AppComponent ngOnInit called');

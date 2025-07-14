@@ -1,88 +1,74 @@
 <app-menu></app-menu>
 
+<div class="form" [@flyInOut] *ngIf="showForm && manager?.role === 'manager'">
+  <form [formGroup]="newProjectForm" (ngSubmit)="onSubmit()">
+    <div class="form-group">
 
-  <div class="form"  [@flyInOut] *ngIf="showForm && manager?.role === 'manager'">
-    <form [formGroup]="newProjectForm"  (ngSubmit)="onSubmit()">
-
-      <div class="form-group">
-
-        <label>Project name:</label>
-        <input type="text"  id="project_name"  formControlName="project_name" class="form-control"
-               >
-        <div *ngIf="newProjectForm.get('project_name')?.hasError('required') && newProjectForm.get('project_name')?.touched">
-          <p class="error-message">Project name is required.</p>
-        </div>
-        <div *ngIf="newProjectForm.get('project_name')?.hasError('minlength') && newProjectForm.get('project_name')?.touched" class="error-message">
-          Project name must be at least 3 characters long.
-        </div>
-        <label>End date:</label>
-        <input type="date" id="end_date" formControlName="end_date" class="form-control" placeholder="yyyy-mm-dd"
-              >
-        <div *ngIf="newProjectForm.get('end_date')?.hasError('required') && newProjectForm.get('end_date')?.touched">
-          End date is required.
-        </div>
-        <div *ngIf="newProjectForm.get('end_date')?.hasError('futureDate') && newProjectForm.get('end_date')?.touched">
-          End date must be a future date.
-        </div>
-        <label>Min people on project:</label>
-        <input type="number"  id="min_members" formControlName="min_members"  min="1" class="form-control"
-              >
-        <div *ngIf="newProjectForm.get('min_members')?.hasError('required') && newProjectForm.get('min_members')?.touched">
-          Minimum members is required.
-        </div>
-        <label>Max people on project:</label>
-        <input type="number" id="max_members" formControlName="max_members"  min="1" max="100" class="form-control"
-               >
-        <div *ngIf="newProjectForm.get('max_members')?.hasError('required') && newProjectForm.get('max_members')?.touched">
-          Maximum members is required.
-        </div>
+      <label for="project_name">Project name:</label>
+      <input type="text" id="project_name" formControlName="project_name" class="form-control" />
+      <div *ngIf="newProjectForm.get('project_name')?.hasError('required') && newProjectForm.get('project_name')?.touched">
+        <p class="error-message">Project name is required.</p>
+      </div>
+      <div *ngIf="newProjectForm.get('project_name')?.hasError('minlength') && newProjectForm.get('project_name')?.touched" class="error-message">
+        Project name must be at least 3 characters long.
       </div>
 
-      <hr class="devide-line">
+      <label for="end_date">End date:</label>
+      <input type="date" id="end_date" formControlName="end_date" class="form-control" placeholder="yyyy-mm-dd" />
+      <div *ngIf="newProjectForm.get('end_date')?.hasError('required') && newProjectForm.get('end_date')?.touched">
+        End date is required.
+      </div>
+      <div *ngIf="newProjectForm.get('end_date')?.hasError('futureDate') && newProjectForm.get('end_date')?.touched">
+        End date must be a future date.
+      </div>
 
-      <button type="submit" class="btn-custom btn">Create project</button>
+      <label for="min_members">Min people on project:</label>
+      <input type="number" id="min_members" formControlName="min_members" min="1" class="form-control" />
+      <div *ngIf="newProjectForm.get('min_members')?.hasError('required') && newProjectForm.get('min_members')?.touched">
+        Minimum members is required.
+      </div>
 
-    </form>
+      <label for="max_members">Max people on project:</label>
+      <input type="number" id="max_members" formControlName="max_members" min="1" max="100" class="form-control" />
+      <div *ngIf="newProjectForm.get('max_members')?.hasError('required') && newProjectForm.get('max_members')?.touched">
+        Maximum members is required.
+      </div>
 
-  </div >
+    </div>
 
-  <br /><br /><br /><br />
+    <hr class="devide-line">
+
+    <button type="submit" class="btn-custom btn">Create project</button>
+  </form>
+</div>
+
+<br /><br /><br /><br />
 
 <div class="card" *ngIf="projects == null">
   <p>No projects yet.</p>
 </div>
 
-  <div class="card" *ngFor="let project of projects">
-    <div class="card-header">
-      Project info:
-    </div>
-    <div class="card-body">
-      <h4 class="card-title">Name: {{ project.name }}</h4>
-      <p class="card-text">Max people: {{ project.max_members }}</p>
-      <p class="card-text">Min people: {{ project.min_members }}</p>
-      <p class="card-text">End Date: {{ project.end_date }}</p>
-      <p class="card-text">Manager: {{ project.manager }}</p>
-      <div class="btn-group">
+<div class="card" *ngFor="let project of projects">
+  <div class="card-header">Project info:</div>
+  <div class="card-body">
+    <h4 class="card-title">Name: {{ project.name }}</h4>
+    <p class="card-text">Max people: {{ project.max_members }}</p>
+    <p class="card-text">Min people: {{ project.min_members }}</p>
+    <p class="card-text">End Date: {{ project.end_date }}</p>
+    <p class="card-text">Manager: {{ project.manager }}</p>
+    <div class="btn-group">
       <button class="btn-next btn-success mb-3" (click)="manageMembersToProject(project.id)">Project details</button>
-      <button  *ngIf="manager.role === 'manager'" class="btn-next btn-danger mb-3" (click)="showDeleteConfirmation(project.id)">Delete project</button>
-
-      </div>
+      <button *ngIf="manager.role === 'manager'" class="btn-next btn-danger mb-3" (click)="showDeleteConfirmation(project.id)">Delete project</button>
     </div>
   </div>
+</div>
 
-
-
-<!--ask user if sure to delete project-->
+<!-- Ask user if sure to delete project -->
 <div *ngIf="visible" class="q-box">
   <label class="q-text">Are you sure you want to delete project?</label>
   <label class="red-text q-text">*This will delete all data from project.</label>
   <div class="d-flex ms-auto button-container">
-    <button class="btn-next btn-outline-light me-2" (click)="cancel()">
-      Cancel
-    </button>
-    <button class="btn-next btn-outline-danger" (click)="deleteProject()">
-      Delete
-    </button>
+    <button class="btn-next btn-outline-light me-2" (click)="cancel()">Cancel</button>
+    <button class="btn-next btn-outline-danger" (click)="deleteProject()">Delete</button>
   </div>
 </div>
-
