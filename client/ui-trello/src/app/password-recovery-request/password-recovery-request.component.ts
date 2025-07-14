@@ -21,7 +21,7 @@ export class PasswordRecoveryRequestComponent {
       error: (err) => {
         console.log(err);
 
-        const errorMessage = err.error?.message || err.error || 'An unexpected error occurred';
+        const errorMessage = err.error?.message ?? err.error ?? 'An unexpected error occurred';
         this.toastr.error(errorMessage);
       }
     });

@@ -8,7 +8,7 @@ import {ToastrService} from "ngx-toastr";
 import {AccountService} from "../services/account.service";
 import {firstValueFrom} from "rxjs";
 import {Project} from "../models/project.model";
-import {UserResponse} from "../member-addition/member-addition.component";
+
 import {ProjectServiceService} from "../services/project-service.service";
 import {GraphEditorComponent} from "../graph-editor/graph-editor.component";
 interface User {
@@ -127,11 +127,12 @@ export class AddTaskComponent implements OnInit {
   }
 
   private updateTaskMembers(task: Task) {
-    this.tempStatusMap[task.id] = task.status as TaskStatus;
-    this.taskMembers[task.id] = task.user_ids.map(userId =>
-      this.findUserById(userId)).filter(user => user !== undefined) as User[];
-
+    this.tempStatusMap[task.id] = task.status;
+    this.taskMembers[task.id] = task.user_ids
+      .map(userId => this.findUserById(userId))
+      .filter((user): user is User => user !== undefined);
   }
+
 
   private updateFilteredUsers(task: Task) {
     this.filteredUsers[task.id] = this.allUsers.filter(user =>
@@ -169,7 +170,7 @@ export class AddTaskComponent implements OnInit {
         },
         error: (error) => {
           console.error('Error creating task:', error);
-          this.toastr.error(error || error.err() || "Something went wrong");
+          this.toastr.error(error ?? error.err() ?? "Something went wrong");
         }
       });
 
@@ -215,7 +216,7 @@ export class AddTaskComponent implements OnInit {
       },
       error: (error) => {
         console.error('Error updating task status:', error);
-        this.toastr.error(error || error.err() || "There has been a problem");
+        this.toastr.error(error ?? error.err() ?? "There has been a problem");
       }
     });
   }

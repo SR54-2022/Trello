@@ -57,7 +57,7 @@ export class AnalyticsComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.projectID = this.route.snapshot.paramMap.get('projectId') || '';
+    this.projectID = this.route.snapshot.paramMap.get('projectId') ?? '';
     if (this.projectID) {
       this.loadAnalytics();
       this.loadProjectDetails(this.projectID);
@@ -65,18 +65,20 @@ export class AnalyticsComponent implements OnInit {
   }
 
   loadAnalytics(): void {
-    this.eventService.getAnalytics(this.projectID).subscribe(
-      (data: Analytics) => {
+
+    this.eventService.getAnalytics(this.projectID).subscribe({
+      next: (data: Analytics) => {
         this.analytics = data;
         this.analytics.project_on_schedule =
           this.analytics.project_on_schedule == null
             ? 'Project is not finished yet.'
             : (this.analytics.project_on_schedule ? 'The project is finished on schedule.' : 'The project is not finished on time, the estimated completion date is exceeded.');
       },
-      (error) => {
+      error: error => {
         console.error('Error fetching analytics:', error);
       }
-    );
+    })
+
   }
 
   loadProjectDetails(projectId: string): void {
@@ -113,7 +115,7 @@ export class AnalyticsComponent implements OnInit {
             this.allUsers.forEach(user => {
               this.userMap.set(user.id, user.email); // Assuming `user.name` holds the user's name
             });
-            console.log('usermap is ' + this.userMap);
+            console.log('usermap size is ' + this.userMap.size);
           })
           .catch(error => {
             console.error('Error fetching user details:', error);

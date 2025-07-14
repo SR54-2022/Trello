@@ -29,7 +29,7 @@ export class PasswordResetComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.email = this.route.snapshot.paramMap.get('email') || '';
+    this.email = this.route.snapshot.paramMap.get('email') ?? '';
   }
 
   validatePassword() {
@@ -37,7 +37,7 @@ export class PasswordResetComponent implements OnInit {
     this.passwordValidation.length = password.length >= 8;
     this.passwordValidation.uppercase = /[A-Z]/.test(password);
     this.passwordValidation.lowercase = /[a-z]/.test(password);
-    this.passwordValidation.number = /[0-9]/.test(password);
+    this.passwordValidation.number = /\d/.test(password);
     this.passwordValidation.specialChar = /[!@#$%^&*]/.test(password);
   }
 
@@ -70,7 +70,7 @@ export class PasswordResetComponent implements OnInit {
         this.router.navigate(['/login']);
       },
       error: (err) => {
-        this.toastr.error(err.error.message || 'Failed to reset password');
+        this.toastr.error(err.error.message ?? 'Failed to reset password');
       },
     });
   }

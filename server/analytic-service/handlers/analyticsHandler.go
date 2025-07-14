@@ -36,6 +36,22 @@ type AnalyticsHandler struct {
 type KeyUserID struct{}
 type KeyRole struct{}
 
+type RequestContext struct {
+	UserID         *string
+	Role           *string
+	RetryCount     int
+	Deadline       time.Time
+	ReqHasDeadline bool
+}
+
+type Config struct {
+	Timeout        time.Duration
+	Logger         *log.Logger
+	CircuitBreaker *gobreaker.CircuitBreaker
+	Client         *http.Client
+	span           trace.Span
+}
+
 func NewAnalyticsHandler(l *log.Logger, r *repository.AnalyticsRepo, custLogger *customLogger.Logger, tracer trace.Tracer) *AnalyticsHandler {
 	return &AnalyticsHandler{l, r, custLogger, tracer}
 }
@@ -314,93 +330,121 @@ func (n *AnalyticsHandler) verifyTokenWithUserService(ctx context.Context,
 	ctx, span := n.tracer.Start(ctx, "NotificationHandler.verifyTokenWithUserService")
 	defer span.End()
 
-	userServiceURL, err := n.getUserServiceURL()
+	userServiceUrl, err := n.getUserServiceURL()
 	if err != nil {
-		return "", "", err
+		return n.recordSpanError(span, err)
 	}
 
-	req, err := n.createRequest(ctx, userServiceURL, token, span)
+	req, err := n.createRequest(ctx, userServiceUrl, token, span)
 	if err != nil {
-		return "", "", err
+		return n.recordSpanError(span, err)
 	}
 
-	client, err := createTLSClient()
+	cl, err := createTLSClient()
 	if err != nil {
-		return "", "", err
+		return n.recordSpanError(span, err)
 	}
 
 	circuitBreaker := n.createCircuitBreaker()
 	r := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
-
-	var userID, role string
 	retryCount := 0
-	deadline, reqHasDeadline := ctx.Deadline()
-	var timeout time.Duration
 
-	err = r.RunCtx(ctx, func(ctx context.Context) error {
-		retryCount++
-		n.logger.Printf("Attempting validate-token request, attempt #%d", retryCount)
+	userID, role, err := n.executeWithRetry(ctx, cl, req, circuitBreaker, r, &retryCount, span)
+	if err != nil {
+		return "", "", err
+	}
 
-		if reqHasDeadline {
-			timeout = time.Until(deadline)
+	return userID, role, nil
+}
+
+func (n *AnalyticsHandler) recordSpanError(span trace.Span, err error) (string, string, error) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	return "", "", err
+}
+
+func (n *AnalyticsHandler) executeWithRetry(
+	ctx context.Context,
+	cl *http.Client,
+	req *http.Request,
+	cb *gobreaker.CircuitBreaker,
+	r *retrier.Retrier,
+	retryCount *int,
+	span trace.Span,
+) (string, string, error) {
+	var userID, role string
+
+	deadline, hasDeadline := ctx.Deadline()
+
+	err := r.RunCtx(ctx, func(ctx context.Context) error {
+		*retryCount++
+		n.logger.Printf("Attempting validate-token request, attempt #%d", *retryCount)
+
+		timeout := n.getTimeout(deadline, hasDeadline)
+		if timeout > 0 {
+			req.Header.Set("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
 		}
 
-		_, err := circuitBreaker.Execute(func() (interface{}, error) {
-			if timeout > 0 {
-				req.Header.Add("Timeout", strconv.Itoa(int(timeout.Milliseconds())))
-			}
-
-			resp, err := client.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
-				return nil, domain.ErrRespTmp{
-					URL:        resp.Request.URL.String(),
-					Method:     resp.Request.Method,
-					StatusCode: resp.StatusCode,
-				}
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
-			}
-
-			var result struct {
-				UserID string `json:"user_id"`
-				Role   string `json:"role"`
-			}
-
-			err = json.NewDecoder(resp.Body).Decode(&result)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				return nil, err
-			}
-
-			userID = result.UserID
-			role = result.Role
-
-			return result, nil
+		_, err := cb.Execute(func() (interface{}, error) {
+			return n.doRequest(cl, req, &userID, &role, span)
 		})
 
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
-			return err
 		}
-		return nil
+		return err
 	})
 
+	return userID, role, err
+}
+
+func (n *AnalyticsHandler) getTimeout(deadline time.Time, hasDeadline bool) time.Duration {
+	if hasDeadline {
+		return time.Until(deadline)
+	}
+	return 0
+}
+
+func (n *AnalyticsHandler) doRequest(
+	cl *http.Client,
+	req *http.Request,
+	userID *string,
+	role *string,
+	span trace.Span,
+) (interface{}, error) {
+	resp, err := cl.Do(req)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", "", err
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return nil, domain.ErrRespTmp{
+			URL:        resp.Request.URL.String(),
+			Method:     resp.Request.Method,
+			StatusCode: resp.StatusCode,
+		}
 	}
 
-	return userID, role, nil
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to validate token, status: %s", resp.Status)
+	}
+
+	var result struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	*userID = result.UserID
+	*role = result.Role
+	return result, nil
 }
 
 func (n *AnalyticsHandler) getUserServiceURL() (string, error) {

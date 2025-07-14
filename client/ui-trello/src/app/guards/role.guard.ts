@@ -14,7 +14,7 @@ export const roleGuard: CanActivateFn = (route, state) => {
   console.log("expectedRoles " + expectedRoles);
   const roles: string[] = expectedRoles.split("|");
 
-  if (roles.indexOf(role || "") === -1) {
+  if (roles.indexOf(role ?? "") === -1) {
     router.navigate(["/forbidden"]);
     return false;
   }

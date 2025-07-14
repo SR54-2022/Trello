@@ -91,7 +91,7 @@ export class LoginComponent implements OnInit {
           } else if (error.status === 500) {
             this.toastr.error('Incorrect credentials.');
           } else {
-            this.toastr.error(error.message || 'An error occurred during login');
+            this.toastr.error(error.message ?? 'An error occurred during login');
           }
         },
       });

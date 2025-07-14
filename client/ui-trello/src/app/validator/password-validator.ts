@@ -5,7 +5,7 @@ export function passwordValidator(): ValidatorFn {
     length: /.{8,}/,
     uppercase: /[A-Z]/,
     lowercase: /[a-z]/,
-    number: /[0-9]/,
+    number: /\d/,
     specialChar: /[!@#$%^&*]/,
   };
 

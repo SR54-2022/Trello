@@ -1,13 +1,11 @@
 <nav class="navbar navbar-expand-lg navbar-light bg-dark">
   <div class="container-fluid">
-    <a class="navbar-brand" href="#"><img class="logo" src="./../../assets/icons/BitByBitLogoWhite.png"/></a>
+    <a class="navbar-brand" href="#"><img class="logo" alt="BitByBit Logo" src="./../../assets/icons/BitByBitLogoWhite.png"/></a>
 
 
 
     <div class="d-flex ms-auto">
-<!--      <button class="btn btn-outline-light me-2" (click)="toggleDarkMode()">-->
-<!--        {{ isDarkMode ? 'Light Mode' : 'Dark Mode' }}-->
-<!--      </button>-->
+
       <div *ngIf="isManager()">
         <button class="btn btn-outline-light me-2" (click)="toggleForm()">
            Add new project

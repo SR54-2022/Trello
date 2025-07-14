@@ -4,8 +4,7 @@ import {ToastrService} from "ngx-toastr";
 import {Router} from "@angular/router";
 import {DeleteService} from "../services/delete.service";
 import { CommonModule } from '@angular/common';
-import {error} from "@angular/compiler-cli/src/transformers/util";
-import {HttpClient} from "@angular/common/http";
+
 import {NotificationService} from "../services/notification-service.service";
 import {FormToggleService} from "../form-toggle.service";
 

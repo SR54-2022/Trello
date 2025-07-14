@@ -20,7 +20,7 @@ export class MagicLinkRequestComponent {
         this.email = ''
       },
       error: (err) => {
-        this.toastr.error(err.error?.message || err.error || 'An unexpected error occurred');
+        this.toastr.error(err.error?.message ?? err.error ?? 'An unexpected error occurred');
     }
     })
 

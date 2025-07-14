@@ -28,7 +28,7 @@ export class MagicLinkComponent implements OnInit {
   }
 
   verifyMagic() {
-    const email = this.route.snapshot.paramMap.get('email') || '';
+    const email = this.route.snapshot.paramMap.get('email') ?? '';
     let role: string;
     this.service.getRole(email).subscribe({
       next: (success) => {

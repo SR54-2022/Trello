@@ -116,8 +116,8 @@ export class GraphEditorComponent implements OnInit {
       if (node) {
         tooltip.style.display = 'block';
 
-        const description = node.description || 'No description available';
-        const status = node.status || 'No status available';
+        const description = node.description ?? 'No description available';
+        const status = node.status ?? 'No status available';
 
         tooltip.innerText = `Description: ${description}\nStatus: ${status}`;
       }

@@ -16,7 +16,6 @@ import { jwtDecode } from 'jwt-decode';
 export class AccountService {
   private userIdSource = new BehaviorSubject<string | null>(null);
   private roleSource = new BehaviorSubject<string | null>(null);
-  userId$ = this.userIdSource.asObservable();
   private tokenVerificationSub!: Subscription;
 
   constructor(private http: HttpClient, private config: ConfigService, private router: Router) {
@@ -37,19 +36,21 @@ export class AccountService {
 
         const role = localStorage.getItem("role");
         if (role) {
-          this.getUserIdFromBackend().subscribe(
-            (userId: string) => {
-              console.log("User ID from server:", userId);
+          this.getUserIdFromBackend().subscribe({
+            next: (userId: string) => {
+              console.log("User  ID from server:", userId);
               this.userIdSource.next(userId);
               this.startTokenVerification(userId);
             },
-            (error) => {
+            error: (error) => {
               console.error("Error fetching userId:", error);
-              this.logout().subscribe(() => {
-                this.router.navigate(['/login']);
+              this.logout().subscribe({
+                complete: () => {
+                  this.router.navigate(['/login']);
+                }
               });
             }
-          );
+          });
         } else {
           this.router.navigate(['/login']);
         }
@@ -77,9 +78,11 @@ export class AccountService {
   }
 
   getTokenFromCookie(): string | null {
-    const matches = document.cookie.match(new RegExp('(^| )auth_token=([^;]+)'));
+    const cookiePattern = /(^| )auth_token=([^;]+)/;
+    const matches = cookiePattern.exec(document.cookie);
     return matches ? matches[2] : null;
   }
+
   register(accountRequest: AccountRequest): Observable<any> {
     return this.http.post(this.config.register_url, accountRequest);
   }
@@ -118,16 +121,16 @@ export class AccountService {
       this.tokenVerificationSub.unsubscribe();
     }
 
-    this.tokenVerificationSub = interval(60000)// set it to 5 minutes
+    this.tokenVerificationSub = interval(60000) // set it to 1 minute
       .pipe(
         switchMap(() => {
           console.log(`[Verification] Checking token for user: ${key} at ${new Date().toLocaleTimeString()}`);
-          const headers = new HttpHeaders().set('X-User-ID', key!);
-          return this.http.get<boolean>(this.config.verify_token_url, { headers });
+          const headers = new HttpHeaders().set('X-User -ID', key!);
+          return this.http.get<boolean>(this.config.verify_token_url, {headers});
         })
       )
-      .subscribe(
-        (isTokenValid) => {
+      .subscribe({
+        next: (isTokenValid) => {
           console.log(`[Response] Token valid: ${isTokenValid} for user: ${key}`);
           if (!isTokenValid) {
             console.warn("[Warning] Token expired. Logging out...");
@@ -138,7 +141,7 @@ export class AccountService {
             });
           }
         },
-        (error) => {
+        error: (error) => {
           console.error("[Error] Error verifying token:", error);
           if (localStorage.getItem("role")) {
             localStorage.removeItem("role");
@@ -146,10 +149,10 @@ export class AccountService {
           this.stopTokenVerification();
           this.router.navigate(['/login']);
         },
-        () => {
+        complete: () => {
           console.log(`[Complete] Token verification stopped for user: ${key}`);
         }
-      );
+      });
   }
 
 

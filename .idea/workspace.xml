@@ -5,10 +5,31 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="179c32f3-1c18-4755-b752-5616defba046" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.scannerwork/.sonar_lock" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.scannerwork/report-task.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.scannerwork/report-task.txt" beforeDir="false" afterPath="$PROJECT_DIR$/.scannerwork/report-task.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/app.component.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/app.component.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/change-password/change-password.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/change-password/change-password.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/graph-editor/graph-editor.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/graph-editor/graph-editor.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/guards/role.guard.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/guards/role.guard.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/magic-link-request/magic-link-request.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/magic-link-request/magic-link-request.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/magic-link/magic-link.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/magic-link/magic-link.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/password-recovery-request/password-recovery-request.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/password-recovery-request/password-recovery-request.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/password-reset/password-reset.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/password-reset/password-reset.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/project-history/project-history.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/project-history/project-history.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/account.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/account.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/config.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/config.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/project-service.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/project-service.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/validator/password-validator.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/validator/password-validator.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/analytic-service/handlers/analyticsHandler.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/analytic-service/handlers/analyticsHandler.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/project-service/handlers/projectHandler.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/project-service/handlers/projectHandler.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/task-service/handlers/taskHandler.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/task-service/handlers/taskHandler.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,6 +40,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "milutinoviic"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/SR54-2022/Trello.git",
+    "accountId": "ec14c400-01d8-4899-b3df-06fb9f219142"
+  }
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 5
 }</component>
@@ -27,22 +60,22 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.formatter.settings.were.checked&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.migrated.go.modules.settings&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.modules.go.list.on.any.changes.was.set&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;sonarqube&quot;,
-    &quot;go.import.settings.migrated&quot;: &quot;true&quot;,
-    &quot;go.sdk.automatically.set&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/stefan&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.go.formatter.settings.were.checked": "true",
+    "RunOnceActivity.go.migrated.go.modules.settings": "true",
+    "RunOnceActivity.go.modules.go.list.on.any.changes.was.set": "true",
+    "git-widget-placeholder": "Merging sonarqube",
+    "go.import.settings.migrated": "true",
+    "go.sdk.automatically.set": "true",
+    "last_opened_file_path": "/home/stefan",
+    "node.js.detected.package.eslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm"
   }
-}</component>
+}]]></component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
