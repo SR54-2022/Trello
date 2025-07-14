@@ -1,4 +1,4 @@
-FROM golang:alpine as build_container
+FROM golang:alpine AS build_container
 RUN apk update && apk add --no-cache tzdata
 ENV TZ=Europe/Budapest
 
@@ -9,7 +9,7 @@ RUN go mod download
 COPY . .
 RUN go build -o server
 
-FROM alpine
+FROM alpine:3.18
 
 COPY --from=build_container /app/server /usr/bin
 COPY --from=build_container /usr/share/zoneinfo /usr/share/zoneinfo

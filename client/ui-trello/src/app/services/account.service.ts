@@ -14,11 +14,11 @@ import { jwtDecode } from 'jwt-decode';
   providedIn: 'root'
 })
 export class AccountService {
-  private userIdSource = new BehaviorSubject<string | null>(null);
-  private roleSource = new BehaviorSubject<string | null>(null);
+  private readonly userIdSource = new BehaviorSubject<string | null>(null);
+  private readonly roleSource = new BehaviorSubject<string | null>(null);
   private tokenVerificationSub!: Subscription;
 
-  constructor(private http: HttpClient, private config: ConfigService, private router: Router) {
+  constructor(private readonly http: HttpClient, private readonly config: ConfigService, private readonly router: Router) {
   }
 
   initializeTokenVerification() {

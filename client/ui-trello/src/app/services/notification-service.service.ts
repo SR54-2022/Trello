@@ -10,9 +10,9 @@ import {Notification} from "../notifications/notifications.component";
 })
 export class NotificationService {
 
-  constructor(private http: HttpClient,
-              private config: ConfigService,
-              private router: Router) { }
+  constructor(private readonly http: HttpClient,
+              private readonly config: ConfigService,
+              private readonly router: Router) { }
 
   getNotificationById(id: string): Observable<Notification> {
     return this.http.get<Notification>(this.config.notifications_url);

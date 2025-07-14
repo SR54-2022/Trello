@@ -8,22 +8,33 @@
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.scannerwork/report-task.txt" beforeDir="false" afterPath="$PROJECT_DIR$/.scannerwork/report-task.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/api-gateway/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/api-gateway/Dockerfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.scss" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.scss" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-project/add-project.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/account-verification/account-verification.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/account-verification/account-verification.component.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/account-verification/account-verification.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/account-verification/account-verification.component.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/add-task/add-task.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/analytics/analytics.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/app.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/app.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/change-password/change-password.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/change-password/change-password.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/form-toggle.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/form-toggle.service.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/graph-editor/graph-editor.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/graph-editor/graph-editor.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/login/login.component.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/member-addition/member-addition.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/member-addition/member-addition.component.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.html" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/menu/menu.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/models/task.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/models/task.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/models/taskDetails.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/models/taskDetails.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/notifications/notifications.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/notifications/notifications.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/project-history/project-history.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/project-history/project-history.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/project/project.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/registration/registration.component.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/registration/registration.component.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/registration/registration.component.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/registration/registration.component.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/account.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/account.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/analytics.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/analytics.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/config.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/config.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/delete.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/delete.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/graph.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/graph.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/notification-service.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/notification-service.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/project-service.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/project-service.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/app/services/task.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/app/services/task.service.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/ui-trello/src/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/client/ui-trello/src/styles.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/analytic-service/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/server/analytic-service/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/notification-service/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/server/notification-service/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/project-service/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/server/project-service/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/task-service/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/server/task-service/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/user-service/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/server/user-service/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/workflow-service/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/server/workflow-service/Dockerfile" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

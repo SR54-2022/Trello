@@ -24,9 +24,9 @@ export class ProjectHistoryComponent implements OnInit {
 
 
   constructor(
-    private eventService: AnalyticsService,
-    private projectService: ProjectServiceService,
-    private route: ActivatedRoute
+    private readonly eventService: AnalyticsService,
+    private readonly projectService: ProjectServiceService,
+    private readonly route: ActivatedRoute
   ) {}
 
   ngOnInit(): void {

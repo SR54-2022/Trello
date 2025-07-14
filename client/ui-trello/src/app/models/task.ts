@@ -1,29 +1,42 @@
 export type TaskStatus = 'Pending' | 'In Progress' | 'Completed';
 
+export interface TaskParams {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  status?: TaskStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  user_ids?: string[];
+  dependencies?: string[];
+  blocked?: boolean;
+}
+
 export class Task {
   id: string;
   projectId: string;
   name: string;
   description: string;
-  status: TaskStatus = 'Pending';
+  status: TaskStatus;
   createdAt: Date;
   updatedAt: Date;
   user_ids: string[];
   dependencies: string[];
   blocked: boolean;
 
-  constructor(
-    id: string,
-    projectId: string,
-    name: string,
-    description: string,
-    status: TaskStatus = 'Pending',
-    createdAt: Date,
-    updatedAt: Date,
-    user_ids: string[] = [],
-    dependencies: string[] = [],
-    blocked: boolean = false
-  ) {
+  constructor({
+                id,
+                projectId,
+                name,
+                description,
+                status = 'Pending',
+                createdAt,
+                updatedAt,
+                user_ids = [],
+                dependencies = [],
+                blocked = false,
+              }: TaskParams) {
     this.id = id;
     this.projectId = projectId;
     this.name = name;

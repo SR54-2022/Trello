@@ -10,7 +10,7 @@ import {TaskGraph} from "../models/task-graph";
 })
 export class GraphService {
 
-  constructor(private http: HttpClient, private config: ConfigService, private router: Router) { }
+  constructor(private readonly http: HttpClient, private readonly config: ConfigService, private readonly router: Router) { }
 
   getWorkflowByProject(id: string): Observable<TaskGraph> {
     return this.http.get<TaskGraph>(this.config.getWorkflowByProject(id))

@@ -10,7 +10,7 @@ import {ProjectDetails} from "../models/projectDetails";
 })
 export class ProjectServiceService {
 
-  constructor(private http: HttpClient, private config: ConfigService) { }
+  constructor(private readonly http: HttpClient, private readonly config: ConfigService) { }
 
   addProject(newProjectRequest: Project): Observable<any> {
     return this.http.post<Project>(this.config.new_project_url, newProjectRequest)

@@ -1,6 +1,21 @@
-import {UserDetails} from "./userDetails";
+import { UserDetails } from "./userDetails";
 
 export type TaskStatus = 'Pending' | 'In Progress' | 'Completed';
+
+export interface TaskDetailsParams {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  status: TaskStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  userIds: string[];
+  user_ids: string[];
+  users: UserDetails[];
+  dependencies: string[];
+  blocked: boolean;
+}
 
 export class TaskDetails {
   id: string;
@@ -16,20 +31,18 @@ export class TaskDetails {
   dependencies: string[];
   blocked: boolean;
 
-  constructor(id: string, projectId: string, name: string, description: string, status: TaskStatus,
-              createdAt: Date, updatedAt: Date, userIds: string[],user_ids:string[] ,users: UserDetails[],
-              dependencies: string[], blocked: boolean) {
-    this.id = id;
-    this.projectId = projectId;
-    this.name = name;
-    this.description = description;
-    this.status = status;
-    this.createdAt = createdAt;
-    this.updatedAt = updatedAt;
-    this.userIds = userIds;
-    this.user_ids = user_ids;
-    this.users = users;
-    this.dependencies = dependencies;
-    this.blocked = blocked;
+  constructor(params: TaskDetailsParams) {
+    this.id = params.id;
+    this.projectId = params.projectId;
+    this.name = params.name;
+    this.description = params.description;
+    this.status = params.status;
+    this.createdAt = params.createdAt;
+    this.updatedAt = params.updatedAt;
+    this.userIds = params.userIds;
+    this.user_ids = params.user_ids;
+    this.users = params.users;
+    this.dependencies = params.dependencies;
+    this.blocked = params.blocked;
   }
 }

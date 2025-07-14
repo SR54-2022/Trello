@@ -9,7 +9,7 @@ import {Observable} from "rxjs";
 })
 export class DeleteService {
 
-  constructor(private http: HttpClient, private config: ConfigService, private router: Router) {}
+  constructor(private readonly http: HttpClient, private readonly config: ConfigService, private readonly router: Router) {}
 
 
   deleteAccount(): Observable<any> {

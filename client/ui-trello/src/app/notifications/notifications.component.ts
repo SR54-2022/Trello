@@ -19,7 +19,7 @@ export class NotificationsComponent implements OnInit{
   notifications: Notification[] = [];
   errorMessage: string = '';
 
-  constructor(private notificationService: NotificationService, private accService: AccountService) {}
+  constructor(private readonly notificationService: NotificationService, private readonly accService: AccountService) {}
 
   ngOnInit(): void {
     this.loadNotifications();

@@ -28,9 +28,9 @@ export class RegistrationComponent implements OnInit{
   private isSubmitting: boolean = false;
 
   constructor(
-    private formBuilder: FormBuilder,
-    private accountService: AccountService,
-    private toaster: ToastrService,
+    private readonly formBuilder: FormBuilder,
+    private readonly accountService: AccountService,
+    private readonly toaster: ToastrService,
   ){}
 
   ngOnInit(): void {

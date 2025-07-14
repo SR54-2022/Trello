@@ -45,7 +45,7 @@ export class ProjectComponent implements OnInit {
 
 
 
-  constructor(private projectService: ProjectServiceService,private router: Router ,private route: ActivatedRoute,private taskService: TaskService, private http: HttpClient, private toastr: ToastrService) {}
+  constructor(private readonly projectService: ProjectServiceService,private readonly router: Router ,private readonly route: ActivatedRoute,private readonly taskService: TaskService, private readonly http: HttpClient, private readonly toastr: ToastrService) {}
 
   ngOnInit(): void {
     this.route.paramMap.subscribe(params => {
@@ -70,7 +70,6 @@ export class ProjectComponent implements OnInit {
     return role === 'manager';
   }
 
-
   loadProjectDetails(projectId: string): void {
     this.projectService.getProjectDetailsById(projectId).subscribe({
       next: (data: ProjectDetails) => {
@@ -79,7 +78,6 @@ export class ProjectComponent implements OnInit {
 
         console.log('Project:', this.project);
 
-        // Skip fetch if userIds is empty
         const userIds = this.project.user_ids;
         if (!Array.isArray(userIds) || userIds.length === 0) {
           console.warn('No userIds provided, skipping fetch.');
@@ -473,9 +471,8 @@ export class ProjectComponent implements OnInit {
     }
   }
 
-
   downloadFile1(doc: TaskDocumentDetails): void {
-    const url = ''; //`${this.config.downloadTaskDocumentUrl()}/${doc.id}`;
+    const url = '';
     this.http.get(url, { responseType: 'blob' }).subscribe((blob) => {
       const a = document.createElement('a');
       const objectUrl = URL.createObjectURL(blob);
@@ -487,16 +484,16 @@ export class ProjectComponent implements OnInit {
   }
 
   downloadFile(doc: TaskDocumentDetails): void {
-    const url = `/api/task-server/tasks/download/${doc.id}`//  `${this.config.downloadTaskDocumentUrl()}/${doc.fileName}`; // Backend endpoint URL
+    const url = `/api/task-server/tasks/download/${doc.id}`
 
     this.http.get(url, { responseType: 'blob' }).subscribe({
       next: (blob) => {
         const a = document.createElement('a');
         const objectUrl = URL.createObjectURL(blob);
         a.href = objectUrl;
-        a.download = doc.fileName; // Ime fajla koji korisnik preuzima
+        a.download = doc.fileName;
         a.click();
-        URL.revokeObjectURL(objectUrl); // Oslobađanje memorije
+        URL.revokeObjectURL(objectUrl);
       },
       error: (err) => {
         console.error('Failed to download file', err);

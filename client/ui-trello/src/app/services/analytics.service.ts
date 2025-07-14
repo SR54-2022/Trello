@@ -8,7 +8,7 @@ import {Observable} from "rxjs";
 })
 export class AnalyticsService {
 
-  constructor(private http: HttpClient, private config: ConfigService) { }
+  constructor(private readonly http: HttpClient, private readonly config: ConfigService) { }
 
   getEvents(projectID: string): Observable<any[]> {
     return this.http.get<any[]>(this.config.getHistoryByProjectId(projectID));

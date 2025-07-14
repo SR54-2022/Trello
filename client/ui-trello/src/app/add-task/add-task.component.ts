@@ -33,6 +33,7 @@ export class AddTaskComponent implements OnInit {
   searchTerm: string = '';
   taskMembers: { [taskId: string]: User[] } = {};
 
+
   constructor(
     private readonly  fb: FormBuilder,
     private readonly route: ActivatedRoute,
@@ -40,7 +41,7 @@ export class AddTaskComponent implements OnInit {
     private readonly  http: HttpClient,
     private readonly  toastr: ToastrService,
     private readonly  accountService: AccountService,
-    private readonly  projectService: ProjectServiceService
+    private  projectService: ProjectServiceService
   ) {
   }
 
@@ -94,13 +95,12 @@ export class AddTaskComponent implements OnInit {
     });
   }
 
-  filterUsers(taskId: string): void {
-    const term = this.searchTerm.toLowerCase();
-    const currentMembers = this.taskMembers[taskId] ?? [];
-    this.filteredUsers[taskId] = this.allUsers.filter(user =>
-      user.email.toLowerCase().includes(term) &&
-      !currentMembers.some(member => member.id === user.id)
-    );
+  filterUsers(taskId: string) {
+    this.filteredUsers[taskId] = this.allUsers
+      .filter(user => user.email.toLowerCase().includes(this.searchTerm.toLowerCase()))
+      .filter(user => {
+        return !this.taskMembers[taskId]?.some(member => member.id === user.id);
+      });
   }
 
 
@@ -146,25 +146,25 @@ export class AddTaskComponent implements OnInit {
 
   onSubmit(): void {
     if (this.taskForm.valid) {
-      const taskData: Task = new Task(
-        '',
-        this.projectId,
-        this.taskForm.value.taskTitle,
-        this.taskForm.value.taskDescription,
-        'Pending',
-        new Date(),
-        new Date(),
-        [],
-        [],
-        false
-      );
+      const taskData = new Task({
+        id: '',
+        projectId: this.projectId,
+        name: this.taskForm.value.taskTitle,
+        description: this.taskForm.value.taskDescription,
+        status: 'Pending',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user_ids: [],
+        dependencies: [],
+        blocked: false
+      });
 
       this.taskService.addTask(taskData).subscribe({
         next: (response) => {
           console.log('Task created successfully');
           this.fetchTasks(this.projectId);
           this.toastr.success("Task successfully created");
-          console.log("The task is created: " + JSON.stringify(response.task))
+          console.log("The task is created: " + JSON.stringify(response.task));
           this.createWorkflowTask(response.task);
           this.taskForm.reset();
         },
@@ -176,7 +176,6 @@ export class AddTaskComponent implements OnInit {
 
       console.log('Task Created:', taskData);
       console.log('Project ID:', this.projectId);
-
     }
   }
 

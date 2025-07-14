@@ -10,7 +10,7 @@ import {AccountService} from "../services/account.service";
 export class AccountVerificationComponent implements OnInit{
   verificationStatus: 'success' | 'error' = 'success'; // This is set dynamically based on the backend response.
 
-  constructor(private router: Router,private route: ActivatedRoute, private service: AccountService) {}
+  constructor(private readonly router: Router,private readonly route: ActivatedRoute, private readonly service: AccountService) {}
 
   retryVerification() {
     this.router.navigate(['/register'])

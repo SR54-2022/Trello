@@ -9,7 +9,7 @@ import {Task} from "../models/task";
 })
 export class TaskService {
 
-  constructor(private http: HttpClient, private config: ConfigService) { }
+  constructor(private readonly http: HttpClient, private readonly config: ConfigService) { }
 
   getTasksByProjectId(projectId: string): Observable<Task[]> {
     return this.http.get<Task[]>(this.config.getTasksByProjectId(projectId)) }
