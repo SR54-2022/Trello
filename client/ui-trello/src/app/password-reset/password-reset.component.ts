@@ -69,8 +69,9 @@ export class PasswordResetComponent implements OnInit {
         this.toastr.success('Password successfully reset');
         this.router.navigate(['/login']);
       },
-      error: (err) => {
-        this.toastr.error(err.error.message ?? 'Failed to reset password');
+      error: () => {
+        this.toastr.error('Failed to reset password');
+        this.router.navigate(['/login']);
       },
     });
   }

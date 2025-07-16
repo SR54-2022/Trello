@@ -263,8 +263,8 @@ func (us *UserService) GetUsersByIds(ctx context.Context, userIds []string) ([]d
 	return users, nil
 }
 
-func (us *UserService) GetRoleByEmail(ctx context.Context, email string) (string, error) {
-	role, err := us.user.GetUserRoleByEmail(ctx, email)
+func (us *UserService) GetRoleForMagic(ctx context.Context, email string) (string, error) {
+	role, err := us.user.GetRoleForMagic(ctx, email)
 	if err != nil {
 		return "", err
 	}

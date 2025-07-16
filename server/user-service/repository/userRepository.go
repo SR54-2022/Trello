@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-redis/redis"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"time"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -36,8 +38,13 @@ type UserRepository struct {
 }
 
 const (
-	errAccount = "Error finding account:"
+	errAccount        = "Error finding account:"
+	recoveryConstruct = "recovery:%s"
 )
+
+func constructKeyForRecovery(a string) string {
+	return fmt.Sprintf(recoveryConstruct, a)
+}
 
 func New(ctx context.Context, logger *log.Logger, custLogger *customLogger.Logger, tracer trace.Tracer) (*UserRepository, error) {
 	dburi := os.Getenv("MONGO_DB_URI")
@@ -272,7 +279,7 @@ func (ur *UserRepository) GetUserIdByEmail(ctx context.Context, email string) (p
 	return existingAccount.ID, nil
 }
 
-func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, token string) (string, error) {
+func (ur *UserRepository) GetRoleForMagic(ctx context.Context, token string) (string, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserRoleByEmail")
 	defer span.End()
 
@@ -288,6 +295,24 @@ func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, token string) 
 	var existingAccount data.Account
 
 	err = accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		ur.logger.Println(errAccount, err)
+		return "", err
+	}
+	span.SetStatus(codes.Ok, "Successfully found role")
+	return existingAccount.Role, nil
+}
+
+func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, email string) (string, error) {
+	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserRoleByEmail")
+	defer span.End()
+
+	accountCollection := ur.getAccountCollection()
+	var existingAccount data.Account
+
+	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -403,8 +428,8 @@ func (ur *UserRepository) ChangePassword(ctx context.Context, id string, passwor
 	return nil
 }
 
-func SendRecoveryEmail(userEmail string) error {
-	recoveryURL := fmt.Sprintf("https://localhost:4200/password/recovery/%s", userEmail)
+func SendRecoveryEmail(userEmail, token string) error {
+	recoveryURL := fmt.Sprintf("https://localhost:4200/password/recovery/%s", token)
 
 	subject := "Password Recovery"
 	body := fmt.Sprintf(`
@@ -415,6 +440,7 @@ func SendRecoveryEmail(userEmail string) error {
 			<p>Please click the button below to reset your password:</p>
 			<a href="%s" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block;">Reset Password</a>
 			<p>If you did not request this, please ignore this email.</p>
+			<p>The link will expire in 5 minutes. </p>
 			<p>Thank you!</p>
 		</body>
 		</html>`, recoveryURL)
@@ -458,7 +484,17 @@ func (ur *UserRepository) HandleRecoveryRequest(ctx context.Context, email strin
 		ur.logger.Println(errAccount, data.ErrEmailDoesntExist())
 		return data.ErrEmailDoesntExist()
 	}
-	err = SendRecoveryEmail(email)
+
+	newId := uuid.New().String()[:10]
+	id := constructKeyForRecovery(newId)
+	err = ur.redis.Set(id, email, 5*time.Minute).Err()
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		ur.logger.Println("Error saving information in database:", err)
+		return err
+	}
+	err = SendRecoveryEmail(email, newId)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -469,15 +505,23 @@ func (ur *UserRepository) HandleRecoveryRequest(ctx context.Context, email strin
 	return nil
 }
 
-func (ur *UserRepository) ResetPassword(ctx context.Context, email string, password string) error {
+func (ur *UserRepository) ResetPassword(ctx context.Context, token string, password string) error {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.ResetPassword")
 	defer span.End()
+
+	email, err := ur.redis.Get(constructKeyForRecovery(token)).Result()
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		ur.logger.Println(errAccount, err)
+		return err
+	}
 
 	accountCollection := ur.getAccountCollection()
 	var existingAccount data.Account
 
 	// Attempt to find the account by email
-	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
+	err = accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
 
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {

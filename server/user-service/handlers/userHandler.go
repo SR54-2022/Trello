@@ -1241,7 +1241,7 @@ func (uh *UserHandler) HandleGettingRole(rw http.ResponseWriter, h *http.Request
 		return
 	}
 
-	role, err := uh.service.GetRoleByEmail(ctx, payload.Email)
+	role, err := uh.service.GetRoleForMagic(ctx, payload.Email)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
