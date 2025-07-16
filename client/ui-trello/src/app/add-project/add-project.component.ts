@@ -111,7 +111,7 @@ export class AddProjectComponent implements OnInit {
   fetchData() {
     this.http.get<Project[]>('/api/project-server/projects').subscribe({
       next: (response) => {
-        this.projects = response.reverse();
+        this.projects = response.slice().reverse();
         console.log('Projects fetched successfully:', this.projects);
       },
       error: (error) => {

@@ -26,7 +26,8 @@
 <div class="board" cdkDropListGroup>
   <div class="column" cdkDropList #pending="cdkDropList" [cdkDropListConnectedTo]="['inProgress', 'completed']" [cdkDropListData]="pendingTasks" (cdkDropListDropped)="onDrop($event)" id="cdk-drop-list-1">
     <h2>Pending</h2>
-    <div *ngFor="let task of pendingTasks" class="task" (click)="openTask(task)" cdkDrag [cdkDragData]="task" (pointerdown)="onPointerDown($event)"  (cdkDragEnded)="onDragEnd()" (cdkDragStarted)="onDragStart()" >
+    <div *ngFor="let task of pendingTasks" class="task" (click)="openTask(task)" cdkDrag [cdkDragData]="task" (pointerdown)="onPointerDown($event)"  (cdkDragEnded)="onDragEnd()" (cdkDragStarted)="onDragStart()" (keydown.enter)="openTask(task)"
+         (keydown.space)="openTask(task)" >
       <div [ngClass]="{'blocked-task': task.blocked}">
       <h3 class="task-with-img">{{ task.name }}<img
       src="assets/icons/details.svg"
@@ -121,7 +122,7 @@
             class="download-icon"
             (click)="downloadFile(doc)"
             (keydown)="handleKeyDown($event, doc)"
-            tabindex="0"
+
           />
         </li>
       </ul>

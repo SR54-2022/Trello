@@ -125,7 +125,7 @@ export class AccountService {
       .pipe(
         switchMap(() => {
           console.log(`[Verification] Checking token for user: ${key} at ${new Date().toLocaleTimeString()}`);
-          const headers = new HttpHeaders().set('X-User -ID', key!);
+          const headers = new HttpHeaders().set('X-User-ID', key!);
           return this.http.get<boolean>(this.config.verify_token_url, {headers});
         })
       )

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-redis/redis"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -28,6 +29,7 @@ import (
 
 type UserRepository struct {
 	cli        *mongo.Client
+	redis      *redis.Client
 	logger     *log.Logger
 	custLogger *customLogger.Logger
 	tracer     trace.Tracer
@@ -49,8 +51,21 @@ func New(ctx context.Context, logger *log.Logger, custLogger *customLogger.Logge
 		return nil, err
 	}
 
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := os.Getenv("REDIS_PORT")
+	redisAddress := fmt.Sprintf("%s:%s", redisHost, redisPort)
+
+	redisCli := redis.NewClient(&redis.Options{
+		Addr: redisAddress,
+	})
+
+	if redisCli.Ping().Err() != nil {
+		return nil, err
+	}
+
 	return &UserRepository{
 		cli:        client,
+		redis:      redisCli,
 		logger:     logger,
 		custLogger: custLogger,
 		tracer:     tracer,
@@ -257,13 +272,22 @@ func (ur *UserRepository) GetUserIdByEmail(ctx context.Context, email string) (p
 	return existingAccount.ID, nil
 }
 
-func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, email string) (string, error) {
+func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, token string) (string, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserRoleByEmail")
 	defer span.End()
+
+	id := constructKeyForMagic(token)
+	email, err := ur.redis.Get(id).Result()
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		ur.logger.Println("Error getting token:", err)
+		return "", nil
+	}
 	accountCollection := ur.getAccountCollection()
 	var existingAccount data.Account
 
-	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
+	err = accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())

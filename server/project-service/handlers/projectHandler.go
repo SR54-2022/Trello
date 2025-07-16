@@ -262,12 +262,6 @@ func (p *ProjectsHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
 	})
 }
 
-func (p *ProjectsHandler) recordError(err error, message string, span trace.Span) {
-	p.logger.Printf("%s : %v", message, err)
-	span.RecordError(err)
-	span.SetStatus(codes.Error, message)
-}
-
 func createTLSClient() (*http.Client, error) {
 	caCert, err := os.ReadFile("/app/cert.crt")
 	if err != nil {

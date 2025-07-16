@@ -234,42 +234,36 @@ func (uh *UserHandler) GetManager(rw http.ResponseWriter, h *http.Request) {
 }
 
 func (uh *UserHandler) DeleteUser(rw http.ResponseWriter, h *http.Request) {
-	ctx, span := uh.tracer.Start(h.Context(), "User Handler.DeleteUser ")
+	ctx, span := uh.tracer.Start(h.Context(), "UserHandler.DeleteUser")
 	defer span.End()
 
 	userID, _ := h.Context().Value(KeyAccount{}).(string)
 
-	manager, err := uh.service.GetOne(ctx, userID)
+	manager, err := uh.getManager(ctx, userID, span, rw)
 	if err != nil {
-		uh.handleError(span, err, rw, "Error fetching manager details", http.StatusInternalServerError)
-		return
-	}
-
-	projectServiceURL, err := uh.getProjectServiceURL()
-	if err != nil {
-		http.Error(rw, "Error creating project service URL", http.StatusInternalServerError)
 		return
 	}
 
 	clientToDo, err := createTLSClient()
 	if err != nil {
-		uh.logger.Printf("Error creating TLS client: %v\n", err)
+		uh.logger.Printf("Error creating TLS client: %v", err)
 		http.Error(rw, "Error creating TLS client", http.StatusInternalServerError)
 		return
 	}
 
-	req, err := uh.createProjectServiceRequest(ctx, projectServiceURL, h, rw)
+	req, cookie, err := uh.buildProjectServiceRequest(ctx, h, rw, span)
 	if err != nil {
 		return
 	}
 
-	resp, err := uh.sendProjectServiceRequest(ctx, req, clientToDo)
+	resp, err := uh.executeProjectServiceRequest(ctx, req, clientToDo)
 	if err != nil {
+		uh.logger.Println("Error during project service request:", err)
 		http.Error(rw, "Error communicating with project service", http.StatusInternalServerError)
 		return
 	}
 
-	if err := uh.handleProjectServiceResponse(resp, rw, userID, manager.Role, h); err != nil {
+	if err := uh.handleProjectServiceResponse(ctx, rw, resp, userID, manager.Role, cookie, h, span); err != nil {
 		return
 	}
 
@@ -280,44 +274,59 @@ func (uh *UserHandler) DeleteUser(rw http.ResponseWriter, h *http.Request) {
 	}
 
 	rw.WriteHeader(http.StatusOK)
-	rw.Write([]byte("User  deleted successfully"))
-	span.SetStatus(codes.Ok, "User  deleted successfully")
+	rw.Write([]byte("User deleted successfully"))
+	span.SetStatus(codes.Ok, "User deleted successfully")
 }
 
-func (uh *UserHandler) getProjectServiceURL() (string, error) {
+func (uh *UserHandler) getManager(ctx context.Context, userID string, span trace.Span, rw http.ResponseWriter) (*data.Account, error) {
+	manager, err := uh.service.GetOne(ctx, userID)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		uh.logger.Printf("Database exception: %v, Id: %s", err, userID)
+		http.Error(rw, "Error fetching manager details", http.StatusInternalServerError)
+		return nil, err
+	}
+	return manager, nil
+}
+
+func (uh *UserHandler) buildProjectServiceRequest(ctx context.Context, h *http.Request, rw http.ResponseWriter, span trace.Span) (*http.Request, *http.Cookie, error) {
 	projectUrl := os.Getenv("LINK_TO_PROJECT_SERVICE")
-	return fmt.Sprintf("%s/projects", projectUrl), nil
-}
+	projectServiceURL := fmt.Sprintf("%s/projects", projectUrl)
 
-func (uh *UserHandler) createProjectServiceRequest(ctx context.Context, projectServiceURL string, h *http.Request, rw http.ResponseWriter) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", projectServiceURL, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Printf("Failed to create request to project-service: %v", err)
-		return nil, err
+		http.Error(rw, "Error communicating with project service", http.StatusInternalServerError)
+		return nil, nil, err
 	}
 
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	authTokenCookie, err := h.Cookie("auth_token")
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Println("No auth token cookie found:", err)
 		http.Error(rw, "Authorization token required", http.StatusUnauthorized)
-		return nil, err
+		return nil, nil, err
 	}
 	req.AddCookie(authTokenCookie)
 
-	return req, nil
+	return req, authTokenCookie, nil
 }
 
-func (uh *UserHandler) sendProjectServiceRequest(ctx context.Context, req *http.Request, clientToDo *http.Client) (*http.Response, error) {
+func (uh *UserHandler) executeProjectServiceRequest(ctx context.Context, req *http.Request, clientToDo *http.Client) (*http.Response, error) {
 	projectBreaker := uh.createCircuitBreaker()
-
-	retryAgain := retrier.New(retrier.ConstantBackoff(3, 1000*time.Millisecond), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
-
+	retryAgain := retrier.New(retrier.ConstantBackoff(3, time.Second), retrier.WhitelistClassifier{domain.ErrRespTmp{}})
 	var resp *http.Response
+
 	err := retryAgain.RunCtx(ctx, func(ctx context.Context) error {
 		_, err := projectBreaker.Execute(func() (interface{}, error) {
-			resp, err := clientToDo.Do(req)
+			var err error
+			resp, err = clientToDo.Do(req)
 			if err != nil {
 				return nil, err
 			}
@@ -340,31 +349,21 @@ func (uh *UserHandler) sendProjectServiceRequest(ctx context.Context, req *http.
 
 			return resp, nil
 		})
-
 		return err
 	})
 
 	return resp, err
 }
 
-func (uh *UserHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
-	return gobreaker.NewCircuitBreaker(
-		gobreaker.Settings{
-			Name:        "DeleteUser ProjectService",
-			MaxRequests: 10,
-			Timeout:     10 * time.Second,
-			Interval:    0,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				return counts.ConsecutiveFailures > 2
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				uh.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
-			},
-		},
-	)
-}
-
-func (uh *UserHandler) handleProjectServiceResponse(resp *http.Response, rw http.ResponseWriter, userID, role string, h *http.Request) error {
+func (uh *UserHandler) handleProjectServiceResponse(
+	ctx context.Context,
+	rw http.ResponseWriter,
+	resp *http.Response,
+	userID, role string,
+	authCookie *http.Cookie,
+	h *http.Request,
+	span trace.Span,
+) error {
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
 		var projects []service.Project
 		if resp.StatusCode == http.StatusOK {
@@ -380,8 +379,8 @@ func (uh *UserHandler) handleProjectServiceResponse(resp *http.Response, rw http
 			return errors.New("member has active projects")
 		}
 
-		if uh.checkTasks(h.Context(), projects, userID, role, nil) {
-			http.Error(rw, "User  has active projects, deletion blocked", http.StatusConflict)
+		if uh.checkTasks(ctx, projects, userID, role, authCookie) {
+			http.Error(rw, "User has active projects, deletion blocked", http.StatusConflict)
 			return errors.New("user has active projects")
 		}
 
@@ -390,7 +389,25 @@ func (uh *UserHandler) handleProjectServiceResponse(resp *http.Response, rw http
 
 	uh.logger.Printf("Unexpected response code %d from project service\n", resp.StatusCode)
 	http.Error(rw, "Error checking manager projects", http.StatusInternalServerError)
-	return errors.New("unexpected response code")
+	span.RecordError(errors.New("unexpected project service response"))
+	return errors.New("unexpected response from project service")
+}
+
+func (uh *UserHandler) createCircuitBreaker() *gobreaker.CircuitBreaker {
+	return gobreaker.NewCircuitBreaker(
+		gobreaker.Settings{
+			Name:        "DeleteUserProjectService",
+			MaxRequests: 10,
+			Timeout:     10 * time.Second,
+			Interval:    0,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				return counts.ConsecutiveFailures > 2
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				uh.logger.Printf("Circuit Breaker '%s' changed from '%s' to '%s'\n", name, from, to)
+			},
+		},
+	)
 }
 
 func (uh *UserHandler) hasActiveProjects(projects []service.Project, userID string) bool {

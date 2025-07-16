@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/go-redis/redis"
 	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -181,8 +182,8 @@ func (uc *UserCache) GetUserIDFromToken(ctx context.Context, token string) (stri
 	return "", errors.New("invalid token or missing user ID")
 }
 
-func SendMagicLink(userEmail string) error {
-	recoveryURL := fmt.Sprintf("https://localhost:4200/magic/%s", userEmail)
+func SendMagicLink(id, userEmail string) error {
+	recoveryURL := fmt.Sprintf("https://localhost:4200/magic/%s", id)
 
 	subject := "Magic Link"
 	body := fmt.Sprintf(`
@@ -231,15 +232,17 @@ func (c *UserCache) ImplementMagic(ctx context.Context, email string) error {
 		return err
 	}
 
-	id := constructKeyForMagic(email)
-	err = c.cli.Set(id, existingAccount.ID.String(), 5*time.Minute).Err()
+	newId := uuid.New().String()[:10]
+
+	id := constructKeyForMagic(newId)
+	err = c.cli.Set(id, existingAccount.Email, 5*time.Minute).Err()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		c.log.Println("Error setting token:", err)
 		return err
 	}
-	err = SendMagicLink(email)
+	err = SendMagicLink(newId, email)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -250,26 +253,28 @@ func (c *UserCache) ImplementMagic(ctx context.Context, email string) error {
 	return nil
 }
 
-func (c *UserCache) VerifyMagic(ctx context.Context, email string) (string, string, error) {
+func (c *UserCache) VerifyMagic(ctx context.Context, url string) (string, string, error) {
 	ctx, span := c.tracer.Start(ctx, "Cache.VerifyMagic")
 	defer span.End()
-	accountCollection := c.userRepository.getAccountCollection()
-	var existingAccount data.Account
-	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		c.log.Println("Error finding account:", err)
-		return "", "", err
-	}
-	id := constructKeyForMagic(email)
-	err = c.cli.Get(id).Err()
+
+	id := constructKeyForMagic(url)
+	email, err := c.cli.Get(id).Result()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		c.log.Println("Error getting token:", err)
 		return "", "", err
 	}
+	accountCollection := c.userRepository.getAccountCollection()
+	var existingAccount data.Account
+	err = accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		c.log.Println("Error finding account:", err)
+		return "", "", err
+	}
+
 	c.log.Println("email is " + email + "role is " + existingAccount.Role + "user id is " + existingAccount.ID.Hex())
 	token, err := utils.CreateToken(email, existingAccount.Role, existingAccount.ID.Hex())
 	if err != nil {

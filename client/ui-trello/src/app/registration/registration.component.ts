@@ -60,7 +60,7 @@ export class RegistrationComponent implements OnInit{
       };
       this.accountService.register(accountRequest).subscribe({
         next: (result) => {
-          if (result && result.message) {
+          if (result?.message) {
             this.toaster.success(result.message);
           } else {
             this.toaster.error('Unexpected response format!');

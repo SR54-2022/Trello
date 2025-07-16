@@ -104,7 +104,7 @@ export class ProjectComponent implements OnInit {
             console.error('Error fetching user details:', error);
           });
 
-        if (this.project && this.project.tasks) {
+        if (this.project?.tasks) {
           this.organizeTasksByStatus(this.project.tasks);
         }
       },
@@ -231,7 +231,7 @@ export class ProjectComponent implements OnInit {
   }
 
   refreshTaskLists(): void {
-    if (this.project && this.project.tasks) {
+    if (this.project?.tasks) {
       this.organizeTasksByStatus(this.project.tasks);
     }
   }
@@ -331,7 +331,7 @@ export class ProjectComponent implements OnInit {
       return;
     }
 
-    const index = assignedMembers.findIndex(member => member.id === member.id);
+    const index = assignedMembers.findIndex(sel =>  !Number.isNaN(sel.id) && sel.id === member.id);
     if (index !== -1) {
       assignedMembers.splice(index, 1);
       this.taskMembers[selectedTask.id] = assignedMembers;

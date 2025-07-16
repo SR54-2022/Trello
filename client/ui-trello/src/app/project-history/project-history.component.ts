@@ -40,7 +40,8 @@ export class ProjectHistoryComponent implements OnInit {
   loadEvents(): void {
     this.eventService.getEvents(this.projectID).subscribe({
       next: (data) => {
-        this.events = data.reverse();
+        this.events = data.slice().reverse();
+
       },
       error: (err) => {
         console.error('Error fetching events:', err);

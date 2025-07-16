@@ -40,26 +40,32 @@ export class GraphEditorComponent implements OnInit {
   }
 
   createGraph() {
-    const visNodes = this.nodes.map((node) => ({
-      id: node.id,
-      label: node.label,
-      description: node.description,
-      blocked: node.blocked,
-      isComplete: node.isComplete,
-      color: {
-        background: node.isComplete ? '#2db629' : node.blocked ? '#FF7F7F' : '#F2BB05',
-        border: '#4E4E55',
-        highlight: {
-          background: node.isComplete ? '#2db629' : node.blocked ? '#FF5A5F' : '#F2BB05',
+    const visNodes = this.nodes.map((node) => {
+      const hoverBackgroundColor = this.getHoverBackgroundColor(node);
+      const backgroundColor = this.getBackgroundColor(node);
+      const highlightColor = this.getHighlightColor(node);
+      return {
+        id: node.id,
+        label: node.label,
+        description: node.description,
+        blocked: node.blocked,
+        isComplete: node.isComplete,
+        color: {
+          background: backgroundColor,
           border: '#4E4E55',
+          highlight: {
+            background: highlightColor,
+            border: '#4E4E55',
+          },
+          hover: {
+            background: hoverBackgroundColor,
+            border: '#4E4E55',
+          },
         },
-        hover: {
-          background: node.isComplete ? '#7FFF7F' : node.blocked ? '#FF7F7F' : '#FBC823',
-          border: '#4E4E55',
-        },
-      },
-      status: node.status,
-    }));
+        status: node.status,
+      };
+    });
+
 
     const visEdges = this.links.map((link) => ({
       from: link.from,
@@ -133,5 +139,21 @@ export class GraphEditorComponent implements OnInit {
   }
 
 
+  private getHoverBackgroundColor(node: TaskNode) {
+    if (node.isComplete) return '#7FFF7F';
+    if (node.blocked) return '#FF7F7F';
+    return '#FBC823';
+  }
 
+  private getBackgroundColor(node: TaskNode) {
+    if (node.isComplete) return '#2db629';
+    if (node.blocked) return '#FF7F7F';
+    return '#F2BB05';
+  }
+
+  private getHighlightColor(node: TaskNode) {
+    if (node.isComplete) return '#2db629';
+    if (node.blocked) return '#FF5A5F';
+    return '#F2BB05';
+  }
 }

@@ -65,8 +65,8 @@
 
 <!-- Ask user if sure to delete project -->
 <div *ngIf="visible" class="q-box">
-  <label class="q-text">Are you sure you want to delete project?</label>
-  <label class="red-text q-text">*This will delete all data from project.</label>
+  <p class="q-text">Are you sure you want to delete project?</p>
+  <p class="red-text q-text">This will delete all data from project.</p>
   <div class="d-flex ms-auto button-container">
     <button class="btn-next btn-outline-light me-2" (click)="cancel()">Cancel</button>
     <button class="btn-next btn-outline-danger" (click)="deleteProject()">Delete</button>

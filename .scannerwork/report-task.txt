@@ -1,6 +1,6 @@
-projectKey=FtnTrello
+projectKey=FTNTrello
 serverUrl=http://localhost:9001
 serverVersion=25.7.0.110598
-dashboardUrl=http://localhost:9001/dashboard?id=FtnTrello
-ceTaskId=93d96d95-881e-42d9-852f-c4883a6065f5
-ceTaskUrl=http://localhost:9001/api/ce/task?id=93d96d95-881e-42d9-852f-c4883a6065f5
+dashboardUrl=http://localhost:9001/dashboard?id=FTNTrello
+ceTaskId=5d48c510-25c7-4cf6-81f5-1b10403eb260
+ceTaskUrl=http://localhost:9001/api/ce/task?id=5d48c510-25c7-4cf6-81f5-1b10403eb260

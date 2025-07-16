@@ -41,7 +41,7 @@ export class AddTaskComponent implements OnInit {
     private readonly  http: HttpClient,
     private readonly  toastr: ToastrService,
     private readonly  accountService: AccountService,
-    private  projectService: ProjectServiceService
+    private readonly projectService: ProjectServiceService
   ) {
   }
 
@@ -114,7 +114,7 @@ export class AddTaskComponent implements OnInit {
   }
 
   private handleFetchResponse(response: Task[]) {
-    this.tasks = response.reverse();
+    this.tasks = response.slice().reverse();
     this.tasks.forEach(task => {
       this.updateTaskMembers(task);
       this.updateFilteredUsers(task);

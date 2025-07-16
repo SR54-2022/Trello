@@ -58,7 +58,7 @@ export class MenuComponent implements OnInit {
             }
           });
           this.router.navigate(['/login']);
-          // alert("Successfully deleted profile.");
+
           this.toastrService.success("Successfully deleted profile.");
 
         },

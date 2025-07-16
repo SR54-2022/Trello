@@ -6,3 +6,4 @@ server/user-service/app.log
 server/workflow-service/app.log
 server/notification-service/app.log
 server/analytic-service/app.log
+.scannerwork

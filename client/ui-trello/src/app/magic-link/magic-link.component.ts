@@ -56,11 +56,11 @@ export class MagicLinkComponent implements OnInit {
 
             setTimeout(() => {
               this.router.navigate(['/projects']);
-            }, 10000);
+            }, 1000);
           } else {
             this.linkValid = false;
           }
-        }, 5000);
+        }, 1000);
       },
       error: () => {
         setTimeout(() => {
