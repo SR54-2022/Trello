@@ -286,7 +286,7 @@ services:
         limits:
           cpus: '0.5'
 
-  api_gateway:
+  api-gateway:
     build:
       context: ./api-gateway/
       dockerfile: Dockerfile

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: collector
+  name: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: collector
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: collector
+    spec:
+      containers:
+        - args:
+            - --config=/etc/otel-collector-config.yaml
+          image: otel/opentelemetry-collector:0.69.0
+          name: collector
+          resources:
+            limits:
+              cpu: 500m
+          volumeMounts:
+            - mountPath: /etc/otel-collector-config.yaml
+              name: collector-cm0
+              subPath: otel-collector-config.yaml
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            items:
+              - key: otel-collector-config.yaml
+                path: otel-collector-config.yaml
+            name: collector-cm0
+          name: collector-cm0

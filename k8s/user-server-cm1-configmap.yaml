@@ -1,0 +1,34 @@
+apiVersion: v1
+data:
+  cert.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIECDCCAvCgAwIBAgIUc6VFgZ8iZkjl1Kc1a1hOVkwk9/UwDQYJKoZIhvcNAQEL
+    BQAwdTELMAkGA1UEBhMCUlMxEjAQBgNVBAgMCVZvanZvZGluYTERMA8GA1UEBwwI
+    Tm92aSBTYWQxETAPBgNVBAoMCEJpdEJ5Qml0MRYwFAYDVQQLDA1JVCBEZXBhcnRt
+    ZW50MRQwEgYDVQQDDAt1c2VyLXNlcnZlcjAeFw0yNDExMjgwOTUyMTNaFw0yNTEx
+    MjgwOTUyMTNaMHUxCzAJBgNVBAYTAlJTMRIwEAYDVQQIDAlWb2p2b2RpbmExETAP
+    BgNVBAcMCE5vdmkgU2FkMREwDwYDVQQKDAhCaXRCeUJpdDEWMBQGA1UECwwNSVQg
+    RGVwYXJ0bWVudDEUMBIGA1UEAwwLdXNlci1zZXJ2ZXIwggEiMA0GCSqGSIb3DQEB
+    AQUAA4IBDwAwggEKAoIBAQC8An1zKzpkzyQu0BsNdoXxafzCPAnOVrrgrC3z42Qd
+    ATbOVBvp3LbEPrAdOPo/u+lffmS2aB5TX3cd8swCsUOnNsDz1zeOYNeIAgkBm8Hw
+    qPZRpHNquPDtxJwrUSq6qIccdfTdGSvyRDs6SIZTGEEjbOGGuJj3QgtPq7qM+t67
+    jL3R2iQn7Ds3NbUkjIumAusknSxiEWc09DUVqjFCZamreSQmLCRpaaxrKCFDB0R/
+    acz5yiPhbcCLQOFV3P0YzwUfevfIs5hVrlR3QPRuheuBp8ir6rwNQOHre5paDTNM
+    MaQN2/DxO4Fi+4VdkhwU8PwK1wfHgOGT07/udcnsrMHJAgMBAAGjgY8wgYwwgYkG
+    A1UdEQSBgTB/ggt1c2VyLXNlcnZlcoILYXBpLWdhdGV3YXmCDnByb2plY3Qtc2Vy
+    dmVyggt0YXNrLXNlcnZlcoITbm90aWZpY2F0aW9uLXNlcnZlcocEfwAAAYIJbG9j
+    YWxob3N0gg93b3JrZmxvdy1zZXJ2ZXKCD2FuYWx5dGljLXNlcnZlcjANBgkqhkiG
+    9w0BAQsFAAOCAQEAFrXxgmSCwRM4yVYL6ZIjAhzpomvO0yjNOk15Deoy1zb2JkSL
+    8fPkV+uStfpyhCwQu6crOzNcVeqAA4VEKSIXdkRrZpnnWq4xbOPm2pAMHbUbQzXl
+    0wt6LP9k/00IfwSpECnfHyNE41wj9NNtIp2TrMqLR8EQjmHhaNC0S+5MfJyXK/jy
+    PkWzGHBoo26tI87JGA3TcQJNVmjykeieGIIOHKBTr9Mt+uVx9u4kedHsAjugbt4+
+    9Eohwb2v6JQV9AbQdyIhADVM5F5AqHREDZOlLA5pUH44Fs1eHY37mf+uDtizUxS+
+    F7mfXiF0ZMahyhfUHsQ3d6EKoE2kCkzsk5x7OQ==
+    -----END CERTIFICATE-----
+kind: ConfigMap
+metadata:
+  annotations:
+    use-subpath: "true"
+  labels:
+    io.kompose.service: user-server
+  name: user-server-cm1

@@ -1,0 +1,207 @@
+apiVersion: v1
+data:
+  .gitignore: |
+    cert.crt
+    privat.key
+    ca.srl
+    ca.key
+    ca.crt
+    ca.cnf
+    san_config.cnf
+    sert.csr
+    cert.csr
+  Dockerfile: |2
+    FROM nginx:1.18
+
+    COPY ./api-gateway.conf /etc/nginx/conf.d/api_gateway.conf
+
+    COPY ./cert.crt /etc/nginx/ssl/cert.crt
+    COPY ./privat.key /etc/nginx/ssl/privat.key
+
+    RUN rm /etc/nginx/conf.d/default.conf
+
+    RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list \
+     && sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list \
+     && apt-get update && apt-get install -y unzip && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+    ADD https://github.com/open-telemetry/opentelemetry-cpp-contrib/releases/download/webserver%2Fv1.0.0/opentelemetry-webserver-sdk-x64-linux.tgz.zip /opt
+    RUN cd /opt && \
+        unzip opentelemetry-webserver-sdk-x64-linux.tgz.zip && \
+        tar xvfz opentelemetry-webserver-sdk-x64-linux.tgz
+
+    RUN cd /opt/opentelemetry-webserver-sdk && ./install.sh
+
+    ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/opentelemetry-webserver-sdk/sdk_lib/lib
+
+    RUN echo "load_module /opt/opentelemetry-webserver-sdk/WebServerModule/Nginx/ngx_http_opentelemetry_module.so;\n$(cat /etc/nginx/nginx.conf)" > /etc/nginx/nginx.conf
+
+    COPY ./opentelemetry_module.conf /etc/nginx/conf.d/
+
+    COPY ./otel-collector-config.yaml /etc/otel-collector-config.yaml
+  api-gateway.conf: |
+    upstream user-server {
+        server user-server:8080;
+    }
+
+    upstream project-server {
+        server project-server:8080;
+    }
+
+    upstream task-server {
+        server task-server:8080;
+    }
+
+    upstream notification-server {
+        server notification-server:8080;
+    }
+
+    upstream analytic-server {
+        server analytic-server:8080;
+    }
+
+    upstream workflow-server {
+        server workflow-server:8080;
+    }
+
+    server {
+            listen 443 ssl;
+            server_name api-gateway;
+
+
+            ssl_certificate /etc/nginx/ssl/cert.crt;
+            ssl_certificate_key /etc/nginx/ssl/privat.key;
+            ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers HIGH:!aNULL:!MD5;
+            ssl_prefer_server_ciphers on;
+
+
+            # Route requests to user-service
+            location /api/user-server/ {
+                proxy_pass https://user-server;
+                rewrite ^/api/user-server/(.*) /$1 break;
+                proxy_ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+                proxy_ssl_verify on;
+            }
+
+            # Route requests to project-server
+            location /api/project-server/ {
+                proxy_pass https://project-server;
+                rewrite ^/api/project-server/(.*) /$1 break;
+                proxy_ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+                proxy_ssl_verify on;
+            }
+
+             # Route requests to project-server
+            location /api/task-server/ {
+                proxy_pass https://task-server;
+                rewrite ^/api/task-server/(.*) /$1 break;
+                proxy_ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+                proxy_ssl_verify on;
+            }
+
+            location /api/notification-server/ {
+               proxy_pass https://notification-server;
+               rewrite ^/api/notification-server/(.*) /$1 break;
+               proxy_ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+               proxy_ssl_verify on;
+            }
+
+            location /api/analytic-server/ {
+                proxy_pass https://analytic-server;
+                rewrite ^/api/analytic-server/(.*) /$1 break;
+                proxy_ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+                proxy_ssl_verify on;
+            }
+
+            location /api/workflow-server/ {
+                proxy_pass https://workflow-server;
+                rewrite ^/api/workflow-server/(.*) /$1 break;
+                proxy_ssl_trusted_certificate /etc/nginx/ssl/cert.crt;
+                proxy_ssl_verify on;
+            }
+    }
+  cert.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIECDCCAvCgAwIBAgIUc6VFgZ8iZkjl1Kc1a1hOVkwk9/UwDQYJKoZIhvcNAQEL
+    BQAwdTELMAkGA1UEBhMCUlMxEjAQBgNVBAgMCVZvanZvZGluYTERMA8GA1UEBwwI
+    Tm92aSBTYWQxETAPBgNVBAoMCEJpdEJ5Qml0MRYwFAYDVQQLDA1JVCBEZXBhcnRt
+    ZW50MRQwEgYDVQQDDAt1c2VyLXNlcnZlcjAeFw0yNDExMjgwOTUyMTNaFw0yNTEx
+    MjgwOTUyMTNaMHUxCzAJBgNVBAYTAlJTMRIwEAYDVQQIDAlWb2p2b2RpbmExETAP
+    BgNVBAcMCE5vdmkgU2FkMREwDwYDVQQKDAhCaXRCeUJpdDEWMBQGA1UECwwNSVQg
+    RGVwYXJ0bWVudDEUMBIGA1UEAwwLdXNlci1zZXJ2ZXIwggEiMA0GCSqGSIb3DQEB
+    AQUAA4IBDwAwggEKAoIBAQC8An1zKzpkzyQu0BsNdoXxafzCPAnOVrrgrC3z42Qd
+    ATbOVBvp3LbEPrAdOPo/u+lffmS2aB5TX3cd8swCsUOnNsDz1zeOYNeIAgkBm8Hw
+    qPZRpHNquPDtxJwrUSq6qIccdfTdGSvyRDs6SIZTGEEjbOGGuJj3QgtPq7qM+t67
+    jL3R2iQn7Ds3NbUkjIumAusknSxiEWc09DUVqjFCZamreSQmLCRpaaxrKCFDB0R/
+    acz5yiPhbcCLQOFV3P0YzwUfevfIs5hVrlR3QPRuheuBp8ir6rwNQOHre5paDTNM
+    MaQN2/DxO4Fi+4VdkhwU8PwK1wfHgOGT07/udcnsrMHJAgMBAAGjgY8wgYwwgYkG
+    A1UdEQSBgTB/ggt1c2VyLXNlcnZlcoILYXBpLWdhdGV3YXmCDnByb2plY3Qtc2Vy
+    dmVyggt0YXNrLXNlcnZlcoITbm90aWZpY2F0aW9uLXNlcnZlcocEfwAAAYIJbG9j
+    YWxob3N0gg93b3JrZmxvdy1zZXJ2ZXKCD2FuYWx5dGljLXNlcnZlcjANBgkqhkiG
+    9w0BAQsFAAOCAQEAFrXxgmSCwRM4yVYL6ZIjAhzpomvO0yjNOk15Deoy1zb2JkSL
+    8fPkV+uStfpyhCwQu6crOzNcVeqAA4VEKSIXdkRrZpnnWq4xbOPm2pAMHbUbQzXl
+    0wt6LP9k/00IfwSpECnfHyNE41wj9NNtIp2TrMqLR8EQjmHhaNC0S+5MfJyXK/jy
+    PkWzGHBoo26tI87JGA3TcQJNVmjykeieGIIOHKBTr9Mt+uVx9u4kedHsAjugbt4+
+    9Eohwb2v6JQV9AbQdyIhADVM5F5AqHREDZOlLA5pUH44Fs1eHY37mf+uDtizUxS+
+    F7mfXiF0ZMahyhfUHsQ3d6EKoE2kCkzsk5x7OQ==
+    -----END CERTIFICATE-----
+  opentelemetry_module.conf: |-
+    NginxModuleEnabled ON;
+    NginxModuleOtelSpanExporter otlp;
+    NginxModuleOtelExporterEndpoint collector:4317;
+    NginxModuleServiceName gateway;
+    NginxModuleServiceNamespace gateway;
+    NginxModuleServiceInstanceId gateway;
+    NginxModuleResolveBackends ON;
+    NginxModuleTraceAsError ON;
+  otel-collector-config.yaml: |-
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+          http:
+    exporters:
+      jaeger:
+        endpoint: jaeger:14250
+        tls:
+          insecure: true
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [jaeger]
+  privat.key: |
+    -----BEGIN RSA PRIVATE KEY-----
+    MIIEpQIBAAKCAQEAvAJ9cys6ZM8kLtAbDXaF8Wn8wjwJzla64Kwt8+NkHQE2zlQb
+    6dy2xD6wHTj6P7vpX35ktmgeU193HfLMArFDpzbA89c3jmDXiAIJAZvB8Kj2UaRz
+    arjw7cScK1EquqiHHHX03Rkr8kQ7OkiGUxhBI2zhhriY90ILT6u6jPreu4y90dok
+    J+w7NzW1JIyLpgLrJJ0sYhFnNPQ1FaoxQmWpq3kkJiwkaWmsayghQwdEf2nM+coj
+    4W3Ai0DhVdz9GM8FH3r3yLOYVa5Ud0D0boXrgafIq+q8DUDh63uaWg0zTDGkDdvw
+    8TuBYvuFXZIcFPD8CtcHx4Dhk9O/7nXJ7KzByQIDAQABAoIBAG1UDVtRge1pPyMx
+    xOl5SL5v4ZmZjCI+8QEBXt96FZeAQzyMUIcX3/gSdBsqLOuu/DCZsTsZJLlaxEvY
+    CqZuKmcsQdwKBLZ4vhzLAi27Q3YM6t/i/3LKBOBe+ml+E5jjs13rge6oWpPQ9ZgY
+    4HOloQtWn3bWFa2C7EzyEdM1dxwb5oZ+qloBMd0K+Bac4xxdddY4rT4iK5ThYQpU
+    EvUeJCqlnMvR/6iVryxVIWqtHJWxTjaXUUxmrIyKRWLN4Z9rD94dOpQAN6WKr8li
+    Tl5yG3QbaPN6lE3FrH/6ybb1Wff5yfyDO5uLozwOXUuRqQBftgqgWch4AkgIgEbt
+    x7hpYFkCgYEA3FNkFwaZ9mFsbOAD6VhYqd00uhHPjW6xb0MavRzJzFeXruge+Cjp
+    d6+1qAxNoXuEws4zqnRbEtaOIhEKxoRifwgQFfQ9Wfc4IN9+9/pKWmHRwS5urXnT
+    B8n0slw0Sz2Oy2+MxPPDI/ai4U6oY3qa+21r9/i1lov5TM4uRv6vKhcCgYEA2nOV
+    mpuDjHDipyyE6hcrcU96lkzEo+u16NJ1dlC6JsHHXxC7BcjCylr7uZuoPmIZpqjR
+    EG9e2PG9jJlYJ70xpNX4IYQaYP34hgc5wk2eLdAbsesCGOsXXteZn3jnILB5KINZ
+    0ydunpWDXivARVvmUPB0vtgeh7BA0h0pfmadPx8CgYEAmzhYzGwHLe/m7jFIMC3g
+    kRNZoTkJCzAP6z3QaakNdlvDbiL0JorUKFDu3syEKJ8XohKZjZ3Zx8TGb7On7sG3
+    jp1Ej+L5Ehe8QFSUY+m+VjySBNJMgQTRqqwaK0oQQW3F2wbkmqDNOtn4WFkNAsCO
+    zVGCfjmG3OASK40aR0QIbdMCgYEAwNojq+84zkZmQhGycXrs9kalQYUaYGBaIuWR
+    n1cbT9Xo7cs2YJ/hH4X9DtoVSKWQYapNjwXTJREdNr+1rLeA2TWwrd4S76emvKQq
+    YJfnWiiMGqEPI/J/mlIaJEg3O4uwGo0DQr9gEA6MgBl9z32XMcNmPYlMQpveTeBC
+    3n02ux8CgYEAusa5y9YweQDZvcDuPWOyGA7Wi5b1+uF1wl/V7Mm9BdxrjjfwZgDN
+    hfV55cF5hLp1qG1wRzxWITPA2N7piPY9xwjaADPtSzKeuAGBnHzrq9C4z56oAiaa
+    m5/4sZw2/Zu+bS3Ufd2Xt8IF/xslelvCtIQH0mCnDmPYlaKCu7Vdqmg=
+    -----END RSA PRIVATE KEY-----
+kind: ConfigMap
+metadata:
+  labels:
+    io.kompose.service: angular-app
+  name: angular-app-cm2

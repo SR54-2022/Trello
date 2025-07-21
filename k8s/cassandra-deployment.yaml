@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: cassandra
+  name: cassandra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: cassandra
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: cassandra
+    spec:
+      containers:
+        - env:
+            - name: CASSANDRA_CLUSTER_NAME
+              value: MyCassandraCluster
+            - name: CASSANDRA_DC
+              value: DC1
+            - name: CASSANDRA_LISTENER_RPC_ADDRESS
+              value: 0.0.0.0
+            - name: CASSANDRA_RACK
+              value: RAC1
+          image: cassandra:4.0
+          livenessProbe:
+            exec:
+              command:
+                - cqlsh
+                - --username
+                - cassandra
+                - --password
+                - cassandra
+                - --execute
+                - describe keyspaces
+            failureThreshold: 10
+            periodSeconds: 15
+            timeoutSeconds: 15
+          name: cassandra
+          ports:
+            - containerPort: 9042
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 500m
+          volumeMounts:
+            - mountPath: /var/lib/cassandra
+              name: cassandra-data
+      hostname: cassandra
+      restartPolicy: Always
+      volumes:
+        - name: cassandra-data
+          persistentVolumeClaim:
+            claimName: cassandra-data

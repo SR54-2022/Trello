@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: neo4j
+  name: neo4j
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: neo4j
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: neo4j
+    spec:
+      containers:
+        - env:
+            - name: NEO4J_AUTH
+              value: neo4j/strongerpassword
+          image: neo4j
+          livenessProbe:
+            exec:
+              command:
+                - cypher-shell -a bolt://localhost:7687 -u neo4j -p strongerpassword 'RETURN 1' || exit 1
+            failureThreshold: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+          name: neo4j
+          ports:
+            - containerPort: 7687
+              protocol: TCP
+            - containerPort: 7474
+              protocol: TCP
+            - containerPort: 7473
+              protocol: TCP
+          resources:
+            limits:
+              cpu: "1"
+          volumeMounts:
+            - mountPath: /data
+              name: neo4j-data
+      restartPolicy: Always
+      volumes:
+        - name: neo4j-data
+          persistentVolumeClaim:
+            claimName: neo4j-data

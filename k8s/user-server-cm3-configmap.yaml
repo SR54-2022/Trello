@@ -1,0 +1,10 @@
+apiVersion: v1
+data:
+  app.log: ""
+kind: ConfigMap
+metadata:
+  annotations:
+    use-subpath: "true"
+  labels:
+    io.kompose.service: user-server
+  name: user-server-cm3

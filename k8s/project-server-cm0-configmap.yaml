@@ -1,0 +1,22 @@
+apiVersion: v1
+data:
+  app.log: |
+    {"event_id":"504eff80-4e63-4dd7-80ee-fece1dbaeef1","level":"info","msg":"Project successfully deleted and event published","project_id":"67b4adc71667260e566565cc","source":"project-server","time":"2025-02-18T15:57:10Z","timestamp":"2025-02-18T15:57:10Z"}
+    {"event_id":"ec50d45d-59ef-4bbe-9b31-a68275ce8a93","level":"info","msg":"Processing request for user ID","role":"manager","source":"project-server","time":"2025-02-18T15:57:10Z","timestamp":"2025-02-18T15:57:10Z","user_id":"67411ded8c20cc34ca06caa7"}
+    {"event_id":"fb247782-5b33-49ae-9059-80288e0ead81","level":"info","msg":"Fetching projects for manager","role":"manager","source":"project-server","time":"2025-02-18T15:57:10Z","timestamp":"2025-02-18T15:57:10Z","user_id":"67411ded8c20cc34ca06caa7"}
+    {"event_id":"fcea04c9-c9b2-49ad-b7d9-dd89b343826e","level":"info","msg":"Successfully fetched projects for user","role":"manager","source":"project-server","time":"2025-02-18T15:57:10Z","timestamp":"2025-02-18T15:57:10Z","user_id":"67411ded8c20cc34ca06caa7"}
+    {"event_id":"68543ef5-3c50-4b54-94b2-f779f641427d","level":"info","msg":"Received project for insertion","project_id":"000000000000000000000000","project_name":"aaaa","source":"project-server","time":"2025-07-09T11:04:52Z","timestamp":"2025-07-09T11:04:52Z"}
+    {"event_id":"30674ced-39fa-41b7-8fca-a829a643aa12","level":"info","msg":"Successfully create project","project_id":"686e4cd462fbf45707c5e307","project_name":"aaaa","source":"project-server","time":"2025-07-09T11:04:52Z","timestamp":"2025-07-09T11:04:52Z"}
+    {"event_id":"20e6e5c4-de9f-40e3-b8b7-6b05a0026b5b","level":"info","msg":"Received project for insertion","project_id":"000000000000000000000000","project_name":"testtttt","source":"project-server","time":"2025-07-09T11:30:51Z","timestamp":"2025-07-09T11:30:51Z"}
+    {"event_id":"4f4642ca-3a1d-46d4-b616-94cc85c63f53","level":"info","msg":"Successfully create project","project_id":"686e52ebdc169f1d80adde5e","project_name":"testtttt","source":"project-server","time":"2025-07-09T11:30:51Z","timestamp":"2025-07-09T11:30:51Z"}
+    {"event_id":"959adf0f-f7b2-4764-aad1-cfe4cb5f9f74","level":"info","msg":"Received project for insertion","project_id":"000000000000000000000000","project_name":"New project!","source":"project-server","time":"2025-07-09T11:41:39Z","timestamp":"2025-07-09T11:41:39Z"}
+    {"event_id":"2eeef61b-8cfa-4ece-a929-4119f5e5a395","level":"info","msg":"Successfully create project","project_id":"686e5573dc169f1d80adde5f","project_name":"New project!","source":"project-server","time":"2025-07-09T11:41:39Z","timestamp":"2025-07-09T11:41:39Z"}
+    {"event_id":"db28c872-4400-4058-821f-024e8e66c0bb","level":"info","msg":"Received project for insertion","project_id":"000000000000000000000000","project_name":"is this working","source":"project-server","time":"2025-07-09T11:45:27Z","timestamp":"2025-07-09T11:45:27Z"}
+    {"event_id":"b0ba39b2-d9f4-4077-8746-ddf7bc959fca","level":"info","msg":"Successfully create project","project_id":"686e5657dc169f1d80adde60","project_name":"is this working","source":"project-server","time":"2025-07-09T11:45:27Z","timestamp":"2025-07-09T11:45:27Z"}
+kind: ConfigMap
+metadata:
+  annotations:
+    use-subpath: "true"
+  labels:
+    io.kompose.service: project-server
+  name: project-server-cm0

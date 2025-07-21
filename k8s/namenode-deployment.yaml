@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: namenode
+  name: namenode
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: namenode
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: namenode
+    spec:
+      containers:
+        - env:
+            - name: CLUSTER_NAME
+              value: test
+            - name: CORE_CONF_fs_defaultFS
+              value: hdfs://namenode:9000
+          image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+          name: namenode
+          ports:
+            - containerPort: 9870
+              protocol: TCP
+            - containerPort: 9000
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 500m
+          volumeMounts:
+            - mountPath: /hadoop/dfs/name
+              name: namenode-data
+      restartPolicy: Always
+      volumes:
+        - name: namenode-data
+          persistentVolumeClaim:
+            claimName: namenode-data

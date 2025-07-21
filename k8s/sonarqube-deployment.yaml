@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: sonarqube
+  name: sonarqube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: sonarqube
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: sonarqube
+    spec:
+      containers:
+        - env:
+            - name: SONARQUBE_JDBC_PASSWORD
+              value: sonarpass
+            - name: SONARQUBE_JDBC_URL
+              value: jdbc:postgresql://sonarqube-database:5432/sonarqube
+            - name: SONARQUBE_JDBC_USERNAME
+              value: sonarqube
+          image: sonarqube
+          name: sonarqube
+          ports:
+            - containerPort: 9000
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /opt/sonarqube/conf
+              name: sonarqube-conf
+            - mountPath: /opt/sonarqube/data
+              name: sonarqube-data
+            - mountPath: /opt/sonarqube/extensions
+              name: sonarqube-extensions
+            - mountPath: /opt/sonarqube/lib/bundled-plugins
+              name: sonarqube-bundled-plugins
+      restartPolicy: Always
+      volumes:
+        - name: sonarqube-conf
+          persistentVolumeClaim:
+            claimName: sonarqube-conf
+        - name: sonarqube-data
+          persistentVolumeClaim:
+            claimName: sonarqube-data
+        - name: sonarqube-extensions
+          persistentVolumeClaim:
+            claimName: sonarqube-extensions
+        - name: sonarqube-bundled-plugins
+          persistentVolumeClaim:
+            claimName: sonarqube-bundled-plugins

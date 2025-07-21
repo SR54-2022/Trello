@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: workflow-server
+  name: workflow-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: workflow-server
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: workflow-server
+    spec:
+      containers:
+        - env:
+            - name: JAEGER_ADDRESS
+              value: http://jaeger:14268/api/traces
+            - name: LINK_TO_USER_SERVICE
+              value: https://user-server:8080
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NEO4J_DB
+              value: bolt://neo4j:7687
+            - name: NEO4J_PASS
+              value: strongerpassword
+            - name: NEO4J_USERNAME
+              value: neo4j
+            - name: PORT
+              value: "8080"
+            - name: TASK_SERVICE_HOST
+              value: task-server
+            - name: TASK_SERVICE_PORT
+              value: "8080"
+          image: workflow-server
+          name: workflow-service
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 500m
+          volumeMounts:
+            - mountPath: /app/cert.crt
+              name: workflow-server-cm0
+              subPath: cert.crt
+            - mountPath: /app/privat.key
+              name: workflow-server-cm1
+              subPath: privat.key
+            - mountPath: /app/app.log
+              name: workflow-server-cm2
+              subPath: app.log
+      hostname: workflow-service
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            items:
+              - key: cert.crt
+                path: cert.crt
+            name: workflow-server-cm0
+          name: workflow-server-cm0
+        - configMap:
+            items:
+              - key: privat.key
+                path: privat.key
+            name: workflow-server-cm1
+          name: workflow-server-cm1
+        - configMap:
+            items:
+              - key: app.log
+                path: app.log
+            name: workflow-server-cm2
+          name: workflow-server-cm2

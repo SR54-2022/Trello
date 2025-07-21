@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: eventstore-db
+  name: eventstore-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: eventstore-db
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: eventstore-db
+    spec:
+      containers:
+        - env:
+            - name: EVENTSTORE_CERTIFICATE_FILE
+              value: /app/cert.crt
+            - name: EVENTSTORE_CERTIFICATE_PRIVATE_KEY_FILE
+              value: /app/privat.key
+            - name: EVENTSTORE_CLUSTER_SIZE
+              value: "1"
+            - name: EVENTSTORE_ENABLE_ATOM_PUB_OVER_HTTP
+              value: "true"
+            - name: EVENTSTORE_ENABLE_EXTERNAL_TCP
+              value: "true"
+            - name: EVENTSTORE_EXT_TCP_PORT
+              value: "1113"
+            - name: EVENTSTORE_HTTP_PORT
+              value: "2113"
+            - name: EVENTSTORE_INSECURE
+              value: "true"
+            - name: EVENTSTORE_RUN_PROJECTIONS
+              value: All
+            - name: EVENTSTORE_START_STANDARD_PROJECTIONS
+              value: "true"
+          image: eventstore/eventstore:21.10.8-buster-slim
+          name: esdb
+          ports:
+            - containerPort: 2113
+              protocol: TCP
+            - containerPort: 1113
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 500m
+          volumeMounts:
+            - mountPath: /var/lib/eventstore
+              name: eventstore-data
+            - mountPath: /app/cert.crt
+              name: eventstore-db-cm1
+              subPath: cert.crt
+            - mountPath: /app/privat.key
+              name: eventstore-db-cm2
+              subPath: privat.key
+      hostname: esdb
+      restartPolicy: Always
+      volumes:
+        - name: eventstore-data
+          persistentVolumeClaim:
+            claimName: eventstore-data
+        - configMap:
+            items:
+              - key: cert.crt
+                path: cert.crt
+            name: eventstore-db-cm1
+          name: eventstore-db-cm1
+        - configMap:
+            items:
+              - key: privat.key
+                path: privat.key
+            name: eventstore-db-cm2
+          name: eventstore-db-cm2

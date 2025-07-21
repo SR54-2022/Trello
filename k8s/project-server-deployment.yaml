@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: project-server
+  name: project-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: project-server
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml
+        kompose.version: 1.36.0 (ae2a39403)
+      labels:
+        io.kompose.service: project-server
+    spec:
+      containers:
+        - env:
+            - name: CAPTCHA
+              value: 6Ld8nY0qAAAAAA32eo88B-yqGzFcRLfPCzAGS1J_
+            - name: JAEGER_ADDRESS
+              value: http://jaeger:14268/api/traces
+            - name: LINK_TO_ANALYTIC_SERVICE
+              value: https://analytic-server:8080
+            - name: LINK_TO_TASK_SERVICE
+              value: https://task-server:8080
+            - name: LINK_TO_USER_SERVICE
+              value: https://user-server:8080
+            - name: MONGO_DB_URI
+              value: mongodb://root:pass@mongo-project:27017
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: PORT
+              value: "8080"
+            - name: TASK_SERVICE_HOST
+              value: task-server
+            - name: TASK_SERVICE_PORT
+              value: "8080"
+            - name: USER_SERVICE_HOST
+              value: user-server
+            - name: USER_SERVICE_PORT
+              value: "8080"
+          image: project-server
+          name: project-server
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 500m
+          volumeMounts:
+            - mountPath: /app/app.log
+              name: project-server-cm0
+              subPath: app.log
+            - mountPath: /app/cert.crt
+              name: project-server-cm1
+              subPath: cert.crt
+            - mountPath: /app/privat.key
+              name: project-server-cm2
+              subPath: privat.key
+      hostname: project-server
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            items:
+              - key: app.log
+                path: app.log
+            name: project-server-cm0
+          name: project-server-cm0
+        - configMap:
+            items:
+              - key: cert.crt
+                path: cert.crt
+            name: project-server-cm1
+          name: project-server-cm1
+        - configMap:
+            items:
+              - key: privat.key
+                path: privat.key
+            name: project-server-cm2
+          name: project-server-cm2

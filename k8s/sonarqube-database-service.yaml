@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml
+    kompose.version: 1.36.0 (ae2a39403)
+  labels:
+    io.kompose.service: sonarqube-database
+  name: sonarqube-database
+spec:
+  ports:
+    - name: "55432"
+      port: 55432
+      targetPort: 5432
+  selector:
+    io.kompose.service: sonarqube-database
