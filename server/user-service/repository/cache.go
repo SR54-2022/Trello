@@ -8,23 +8,26 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 	"log"
-	"main.go/data"
-	"main.go/utils"
 	"net/mail"
 	"net/smtp"
 	"os"
 	"regexp"
 	"time"
+	"user-service/customLogger"
+	"user-service/data"
+	"user-service/utils"
 )
 
 type UserCache struct {
 	cli            *redis.Client
 	log            *log.Logger
+	customLogger   *customLogger.Logger
 	userRepository *UserRepository
 	tracer         trace.Tracer
 }
@@ -56,7 +59,7 @@ func constructKeyForMagic(email string) string {
 
 func constructKeyForRegister(email string) string { return fmt.Sprintf(cacheRegister, email) }
 
-func NewCache(logger *log.Logger, repo *UserRepository, trace trace.Tracer) (*UserCache, error) {
+func NewCache(logger *log.Logger, repo *UserRepository, trace trace.Tracer, customLogger *customLogger.Logger) (*UserCache, error) {
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
 	redisAddress := fmt.Sprintf("%s:%s", redisHost, redisPort)
@@ -73,6 +76,7 @@ func NewCache(logger *log.Logger, repo *UserRepository, trace trace.Tracer) (*Us
 		cli:            client,
 		log:            logger,
 		userRepository: repo,
+		customLogger:   customLogger,
 		tracer:         trace,
 	}, nil
 }
@@ -80,10 +84,18 @@ func NewCache(logger *log.Logger, repo *UserRepository, trace trace.Tracer) (*Us
 func (uc *UserCache) Login(ctx context.Context, user *data.LoginCredentials, token string) error {
 	ctx, span := uc.tracer.Start(ctx, "Cache.Login")
 	defer span.End()
+	uc.customLogger.Info(logrus.Fields{
+		"method": "Login",
+		"token":  token,
+	}, "Starting Login")
 	keyForId, err := uc.userRepository.GetUserIdByEmail(ctx, user.Email)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, "Error getting user id")
 		return errors.New("key is not found")
 	}
 
@@ -91,6 +103,10 @@ func (uc *UserCache) Login(ctx context.Context, user *data.LoginCredentials, tok
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, "Error getting user")
 		return err
 	}
 
@@ -98,6 +114,10 @@ func (uc *UserCache) Login(ctx context.Context, user *data.LoginCredentials, tok
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, "Email and Password do not match")
 		return errors.New("email and password don't match")
 	}
 
@@ -105,6 +125,10 @@ func (uc *UserCache) Login(ctx context.Context, user *data.LoginCredentials, tok
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, err.Error())
 		return err
 	}
 
@@ -113,26 +137,42 @@ func (uc *UserCache) Login(ctx context.Context, user *data.LoginCredentials, tok
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, "Error")
 	}
 	span.SetStatus(codes.Ok, "Login success")
-
+	uc.customLogger.Info(logrus.Fields{
+		"method": "Login",
+		"token":  token,
+	}, "Successful Login")
 	return err
 }
 
 func (uc *UserCache) VerifyToken(ctx context.Context, userID string) (bool, error) {
 	_, span := uc.tracer.Start(ctx, "Cache.VerifyToken")
 	defer span.End()
+	uc.customLogger.Info(logrus.Fields{
+		"method": "VerifyToken",
+		"ID":     userID,
+	}, "Starting VerifyToken")
 	key := constructKeyForUser(userID)
 	exists, err := uc.cli.Exists(key).Result()
 
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, "Error")
 		return false, err
 	}
 
 	if exists > 0 {
 		span.SetStatus(codes.Ok, "Token exists")
+
 		return true, nil
 	} else {
 		span.SetStatus(codes.Ok, "Token not found")
@@ -144,23 +184,43 @@ func (uc *UserCache) Logout(ctx context.Context, id string) error {
 	_, span := uc.tracer.Start(ctx, "Cache.Logout")
 	defer span.End()
 	key := constructKeyForUser(id)
+	uc.customLogger.Info(logrus.Fields{
+		"method": "Logout",
+		"ID":     id,
+	}, "Starting Logout")
 	err := uc.cli.Del(key).Err()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+		uc.customLogger.Error(logrus.Fields{
+			"method": "Login",
+			"error":  err.Error(),
+		}, "Error")
 		return err
 	}
 	span.SetStatus(codes.Ok, "Logout success")
+	uc.customLogger.Info(logrus.Fields{
+		"method": "Logout",
+		"ID":     id,
+	}, "Successful Logout")
 	return nil
 }
 
 func (uc *UserCache) GetUserIDFromToken(ctx context.Context, token string) (string, error) {
 	_, span := uc.tracer.Start(ctx, "Cache.GetUserIDFromToken")
 	defer span.End()
+	uc.customLogger.Info(logrus.Fields{
+		"method": "GetUserIDFromToken",
+		"token":  token,
+	}, "Starting GetUserIDFromToken")
 	parsedToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			span.RecordError(errors.New(signError))
 			span.SetStatus(codes.Error, signError)
+			uc.customLogger.Error(logrus.Fields{
+				"method": "GetUserIDFromToken",
+				"error":  errors.New(signError),
+			}, signError)
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(os.Getenv("SECRET_KEY")), nil
@@ -169,12 +229,19 @@ func (uc *UserCache) GetUserIDFromToken(ctx context.Context, token string) (stri
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uc.log.Println("Error parsing token:", err)
+		uc.customLogger.Error(logrus.Fields{
+			"method": "GetUserIDFromToken",
+			"error":  err.Error(),
+		}, invalidToken)
 		return "", errors.New(invalidToken)
 	}
 
 	if claims, ok := parsedToken.Claims.(jwt.MapClaims); ok && parsedToken.Valid {
 		userID := claims["user_id"].(string)
 		span.SetStatus(codes.Ok, "User found")
+		uc.customLogger.Info(logrus.Fields{
+			"method": "GetUserIDFromToken",
+		}, "Successful GetUserIDFromToken")
 		return userID, nil
 	}
 	span.RecordError(err)

@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 type Config struct {
 	Port             string
@@ -12,14 +15,18 @@ type Config struct {
 	QueryServicePort string
 }
 
-func NewConfig() Config {
-	return Config{
-		Port:             os.Getenv("PORT"),
-		ESDBUser:         os.Getenv("ESDB_USER"),
-		ESDBPass:         os.Getenv("ESDB_PASS"),
-		ESDBHost:         os.Getenv("ESDB_HOST"),
-		ESDBPort:         os.Getenv("ESDB_PORT"),
-		QueryServiceHost: os.Getenv("QUERY_SERVICE_HOST"),
-		QueryServicePort: os.Getenv("QUERY_SERVICE_PORT"),
+func NewConfig() *Config {
+	cfg := &Config{
+		ESDBHost: os.Getenv("ESDB_HOST"),
+		ESDBPort: os.Getenv("ESDB_PORT"),
+		ESDBUser: os.Getenv("ESDB_USER"),
+		ESDBPass: os.Getenv("ESDB_PASS"),
 	}
+
+	fmt.Println("Loaded ESDB Config:")
+	fmt.Printf("  Host: %s\n", cfg.ESDBHost)
+	fmt.Printf("  Port: %s\n", cfg.ESDBPort)
+	fmt.Printf("  User: %s\n", cfg.ESDBUser)
+
+	return cfg
 }

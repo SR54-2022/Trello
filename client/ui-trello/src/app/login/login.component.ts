@@ -1,11 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ViewChild } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, FormControl } from '@angular/forms';
 import { LoginRequest } from '../models/login-request';
 import { AccountService } from '../services/account.service';
 import { ToastrService } from 'ngx-toastr';
 import { Router } from '@angular/router';
 import { environment } from '../../environments/environment';
-
+import { RecaptchaComponent } from 'ng-recaptcha';
 
 @Component({
   selector: 'app-login',
@@ -13,6 +13,8 @@ import { environment } from '../../environments/environment';
   styleUrls: ['./login.component.css'],
 })
 export class LoginComponent implements OnInit {
+  @ViewChild(RecaptchaComponent) recaptchaComponent!: RecaptchaComponent;
+
   loginForm!: FormGroup;
   showPassword: boolean = false;
   isSubmitting: boolean = false;
@@ -40,9 +42,10 @@ export class LoginComponent implements OnInit {
   }
 
   onCaptchaResolved(captchaResponse: string | null) {
-    this.recaptchaControl.setValue(captchaResponse);
+    if (this.recaptchaControl.value !== captchaResponse) {
+      this.recaptchaControl.setValue(captchaResponse);
+    }
     this.captchaResolvedTime = new Date();
-
 
     if (this.captchaResetTimeout) {
       clearTimeout(this.captchaResetTimeout);
@@ -53,6 +56,9 @@ export class LoginComponent implements OnInit {
   }
 
   resetCaptcha() {
+    if (this.recaptchaComponent) {
+      this.recaptchaComponent.reset();  // reset the widget UI
+    }
     this.recaptchaControl.setValue(null);
     this.captchaResolvedTime = null;
     this.toastr.warning('Please complete the CAPTCHA again.');
@@ -86,6 +92,7 @@ export class LoginComponent implements OnInit {
           console.error('Login error:', error);
           localStorage.removeItem("role");
           this.isSubmitting = false;
+
           if (error.status === 403) {
             this.toastr.error('You are already logged in');
           } else if (error.status === 500) {
@@ -93,6 +100,7 @@ export class LoginComponent implements OnInit {
           } else {
             this.toastr.error(error.message ?? 'An error occurred during login');
           }
+          this.resetCaptcha();
         },
       });
     } else if (!this.captchaResolvedTime || new Date().getTime() - this.captchaResolvedTime.getTime() >= fiveMinutes) {

@@ -20,7 +20,8 @@ label {
 }
 
 input[type="email"],
-input[type="password"] {
+input[type="password"],
+input[type="text"] {
   width: 100%;
   padding: 10px;
   margin-bottom: 0.5rem;
@@ -31,7 +32,8 @@ input[type="password"] {
 }
 
 input[type="email"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+input[type="text"] {
   border-color: var(--primary-color);
   outline: none;
 }

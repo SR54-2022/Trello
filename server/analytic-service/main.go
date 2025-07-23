@@ -49,22 +49,14 @@ func main() {
 	cfg := config2.NewConfig()
 
 	connString := fmt.Sprintf("esdb://%s:%s@%s:%s?tls=false", cfg.ESDBUser, cfg.ESDBPass, cfg.ESDBHost, cfg.ESDBPort)
+
+	fmt.Println("Connecting to EventStore with: ", connString)
+
 	settings, err := esdb.ParseConnectionString(connString)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	/*
-		eventStoreConfig := &esdb.Configuration{
-			Address:                     "localhost:2113", // Use TCP port (1113)
-			KeepAliveInterval:           110 * time.Second,
-			KeepAliveTimeout:            220 * time.Second,
-			MaxDiscoverAttempts:         70,
-			DisableTLS:                  true, // Ensure TLS is disabled
-			SkipCertificateVerification: true, // Skip cert verification (no TLS)
-		}
-		log.Printf("Connecting to EventStore at address: %s", eventStoreConfig.Address)
-	*/
 	client, err := esdb.NewClient(settings)
 	if err != nil {
 		logger.Fatal("Error initializing EventStore client: ", err)

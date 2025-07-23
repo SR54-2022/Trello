@@ -8,25 +8,26 @@ import (
 	"fmt"
 	"github.com/go-redis/redis"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"time"
+	"user-service/customLogger"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 	"log"
-	"main.go/customLogger"
-	"main.go/data"
-	"main.go/utils"
 	"net/http"
 	"net/smtp"
 	"net/url"
 	"os"
 	"strings"
+	"user-service/data"
+	"user-service/utils"
 )
 
 type UserRepository struct {
@@ -85,6 +86,7 @@ func (ur *UserRepository) Disconnect(ctx context.Context) error {
 	err := ur.cli.Disconnect(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
+
 		return err
 	}
 	span.SetStatus(codes.Ok, "Successfully disconnected")
@@ -185,23 +187,41 @@ func (uh *UserRepository) GetAllManagers(ctx context.Context) (data.Accounts, er
 	ctx, span := uh.tracer.Start(ctx, "UserRepository.GetAllManagers")
 	defer span.End()
 
-	managersCollection := uh.getAccountCollection()
+	uh.custLogger.Debug(logrus.Fields{
+		"method": "GetAllManagers",
+	}, "Starting GetAllManagers")
 
+	managersCollection := uh.getAccountCollection()
 	var managers data.Accounts
 	filter := bson.M{"role": "manager"}
+
 	managersCursor, err := managersCollection.Find(ctx, filter)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Println(err)
+		uh.custLogger.Error(logrus.Fields{
+			"method": "GetAllManagers",
+			"error":  err.Error(),
+		}, "Error finding managers")
 		return nil, err
 	}
+
 	if err = managersCursor.All(ctx, &managers); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Println(err)
+		uh.custLogger.Error(logrus.Fields{
+			"method": "GetAllManagers",
+			"error":  err.Error(),
+		}, "Error decoding manager results")
 		return nil, err
 	}
+
+	uh.custLogger.Info(logrus.Fields{
+		"method": "GetAllManagers",
+		"count":  len(managers),
+	}, "Successfully retrieved all managers")
 
 	span.SetStatus(codes.Ok, "Successfully found all managers")
 	return managers, nil
@@ -211,18 +231,45 @@ func (uh *UserRepository) GetOne(ctx context.Context, userId string) (*data.Acco
 	ctx, span := uh.tracer.Start(ctx, "UserRepository.GetOne")
 	defer span.End()
 
-	managersCollection := uh.getAccountCollection()
+	uh.custLogger.Debug(logrus.Fields{
+		"method": "GetOne",
+		"userId": userId,
+	}, "Starting GetOne")
 
 	objectId, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		uh.custLogger.Error(logrus.Fields{
+			"method": "GetOne",
+			"userId": userId,
+			"error":  err.Error(),
+		}, "Invalid ObjectID format")
+		return nil, err
+	}
 
+	managersCollection := uh.getAccountCollection()
 	var manager data.Account
 	err = managersCollection.FindOne(ctx, bson.M{"_id": objectId}).Decode(&manager)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		uh.logger.Println("Error finding manager:", objectId)
+		uh.custLogger.Error(logrus.Fields{
+			"method":   "GetOne",
+			"userId":   userId,
+			"objectId": objectId.Hex(),
+			"error":    err.Error(),
+		}, "Error finding manager by ID")
 		return nil, err
 	}
+
+	uh.custLogger.Info(logrus.Fields{
+		"method":   "GetOne",
+		"userId":   userId,
+		"objectId": objectId.Hex(),
+	}, "Successfully found manager")
+
 	span.SetStatus(codes.Ok, "Successfully found manager")
 	return &manager, nil
 }
@@ -231,10 +278,18 @@ func (ur *UserRepository) GetAllMembers(ctx context.Context) ([]data.Account, er
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetAllMembers")
 	defer span.End()
 
+	ur.custLogger.Debug(logrus.Fields{
+		"method": "GetAllMembers",
+	}, "Starting GetAllMembers")
+
 	if err := ur.cli.Ping(ctx, readpref.Primary()); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Database not available")
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetAllMembers",
+			"error":  err.Error(),
+		}, "Database ping failed")
 		return nil, fmt.Errorf("database not available: %w", err)
 	}
 
@@ -246,6 +301,10 @@ func (ur *UserRepository) GetAllMembers(ctx context.Context) ([]data.Account, er
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error finding accounts:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetAllMembers",
+			"error":  err.Error(),
+		}, "Error querying members")
 		return nil, err
 	}
 	defer cursor.Close(ctx)
@@ -255,8 +314,18 @@ func (ur *UserRepository) GetAllMembers(ctx context.Context) ([]data.Account, er
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error decoding accounts:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetAllMembers",
+			"error":  err.Error(),
+		}, "Error decoding member results")
 		return nil, err
 	}
+
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetAllMembers",
+		"count":  len(accounts),
+	}, "Successfully retrieved all members")
+
 	span.SetStatus(codes.Ok, "Successfully found members")
 	return accounts, nil
 }
@@ -264,6 +333,11 @@ func (ur *UserRepository) GetAllMembers(ctx context.Context) ([]data.Account, er
 func (ur *UserRepository) GetUserIdByEmail(ctx context.Context, email string) (primitive.ObjectID, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserIdByEmail")
 	defer span.End()
+
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserIdByEmail",
+		"email":  email,
+	}, "Starting GetUserIdByEmail")
 
 	accountCollection := ur.getAccountCollection()
 	var existingAccount data.Account
@@ -273,22 +347,37 @@ func (ur *UserRepository) GetUserIdByEmail(ctx context.Context, email string) (p
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUserIdByEmail",
+			"error":  err.Error(),
+		}, "Error finding user")
 		return primitive.NilObjectID, err
 	}
-	span.SetStatus(codes.Ok, "Successfully found account")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserIdByEmail",
+		"ID":     existingAccount.ID,
+	}, "Successfully found ID")
+	span.SetStatus(codes.Ok, "Successfully found ID")
 	return existingAccount.ID, nil
 }
 
 func (ur *UserRepository) GetRoleForMagic(ctx context.Context, token string) (string, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserRoleByEmail")
 	defer span.End()
-
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetRoleForMagic",
+		"token":  token,
+	}, "Starting GetRoleForMagic")
 	id := constructKeyForMagic(token)
 	email, err := ur.redis.Get(id).Result()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error getting token:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetRoleForMagic",
+			"error":  err.Error(),
+		}, "Error finding token")
 		return "", nil
 	}
 	accountCollection := ur.getAccountCollection()
@@ -299,9 +388,18 @@ func (ur *UserRepository) GetRoleForMagic(ctx context.Context, token string) (st
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetRoleForMagic",
+			"error":  err.Error(),
+		}, "Error finding role")
 		return "", err
 	}
 	span.SetStatus(codes.Ok, "Successfully found role")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetRoleForMagic",
+		"role":   existingAccount.Role,
+	}, "Successfully found GetRoleForMagic")
+	span.SetStatus(codes.Ok, "Successfully found ID")
 	return existingAccount.Role, nil
 }
 
@@ -312,14 +410,27 @@ func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, email string) 
 	accountCollection := ur.getAccountCollection()
 	var existingAccount data.Account
 
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserRoleByEmail",
+		"email":  email,
+	}, "Starting GetUserRoleByEmail")
+
 	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUserRoleByEmail",
+			"error":  err.Error(),
+		}, "Error finding role")
 		return "", err
 	}
 	span.SetStatus(codes.Ok, "Successfully found role")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserRoleByEmail",
+		"role":   existingAccount.Role,
+	}, "Successfully found role")
 	return existingAccount.Role, nil
 }
 
@@ -327,21 +438,37 @@ func (ur *UserRepository) GetUserByEmail(ctx context.Context, email string) (dat
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserByEmail")
 	defer span.End()
 	accountCollection := ur.getAccountCollection()
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserByEmail",
+		"email":  email,
+	}, "Starting GetUserByEmail")
 	var existingAccount data.Account
 	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUserByEmail",
+			"error":  err.Error(),
+		}, "Error finding role")
 		return data.Account{}, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found user")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserByEmail",
+		"email":  email,
+	}, "Successful GetUserByEmail")
 	return existingAccount, nil
 }
 
 func (ur *UserRepository) GetUserById(ctx context.Context, id string) (data.Account, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUserById")
 	defer span.End()
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserById",
+		"ID":     id,
+	}, "Starting GetUserById")
 	accountCollection := ur.getAccountCollection()
 	var existingAccount data.Account
 	objectId, err := primitive.ObjectIDFromHex(id)
@@ -349,6 +476,10 @@ func (ur *UserRepository) GetUserById(ctx context.Context, id string) (data.Acco
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error parsing object id:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUserById",
+			"error":  err.Error(),
+		}, "Error with ID")
 		return data.Account{}, err
 	}
 	err = accountCollection.FindOne(ctx, bson.M{"_id": objectId}).Decode(&existingAccount)
@@ -356,20 +487,36 @@ func (ur *UserRepository) GetUserById(ctx context.Context, id string) (data.Acco
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUserById",
+			"error":  err.Error(),
+		}, "Error finding user")
 		return data.Account{}, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found user")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUserById",
+		"ID":     id,
+	}, "Successful GetUserById")
 	return existingAccount, nil
 }
 
 func (ur *UserRepository) CheckIfPasswordIsSame(ctx context.Context, id string, password string) bool {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.CheckIfPasswordIsSame")
 	defer span.End()
+	ur.custLogger.Info(logrus.Fields{
+		"method": "CheckIfPasswordIsSame",
+		"ID":     id,
+	}, "Starting CheckIfPasswordIsSame")
 	acc, err := ur.GetUserById(ctx, id)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "CheckIfPasswordIsSame",
+			"error":  err.Error(),
+		}, "Error finding user")
 		return false
 	}
 	err = bcrypt.CompareHashAndPassword([]byte(acc.Password), []byte(password))
@@ -377,9 +524,17 @@ func (ur *UserRepository) CheckIfPasswordIsSame(ctx context.Context, id string, 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error comparing password:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "CheckIfPasswordIsSame",
+			"error":  err.Error(),
+		}, "Error comparing password")
 		return false
 	}
 	span.SetStatus(codes.Ok, "Successfully compared the passwords")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "CheckIfPasswordIsSame",
+		"ID":     id,
+	}, "Successful CheckIfPasswordIsSame")
 	return true
 }
 func (ur *UserRepository) ChangePassword(ctx context.Context, id string, password string) error {
@@ -387,12 +542,19 @@ func (ur *UserRepository) ChangePassword(ctx context.Context, id string, passwor
 	defer span.End()
 
 	accountCollection := ur.getAccountCollection()
-
+	ur.custLogger.Info(logrus.Fields{
+		"method": "ChangePassword",
+		"ID":     id,
+	}, "Starting ChangePassword")
 	err := ForbidPassword(password)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error forbiding password:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ChangePassword",
+			"error":  err.Error(),
+		}, "Error")
 		return err
 	}
 
@@ -401,6 +563,10 @@ func (ur *UserRepository) ChangePassword(ctx context.Context, id string, passwor
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error hashing password:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ChangePassword",
+			"error":  err.Error(),
+		}, "Error hashing password")
 		return err
 	}
 
@@ -409,6 +575,10 @@ func (ur *UserRepository) ChangePassword(ctx context.Context, id string, passwor
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error parsing object id:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ChangePassword",
+			"error":  err.Error(),
+		}, "Error parsing object id")
 		return errors.New("invalid user ID format")
 	}
 
@@ -421,10 +591,17 @@ func (ur *UserRepository) ChangePassword(ctx context.Context, id string, passwor
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error updating account:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ChangePassword",
+			"error":  err.Error(),
+		}, "Error updating account")
 		return err
 	}
 
 	span.SetStatus(codes.Ok, "Successfully changed password")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "ChangePassword",
+	}, "Successfully changed password")
 	return nil
 }
 
@@ -470,18 +647,29 @@ func (ur *UserRepository) HandleRecoveryRequest(ctx context.Context, email strin
 	defer span.End()
 	accountCollection := ur.getAccountCollection()
 	var existingAccount data.Account
-
+	ur.custLogger.Info(logrus.Fields{
+		"method": "HandleRecoveryRequest",
+		"email":  email,
+	}, "Starting HandleRecoveryRequest")
 	err := accountCollection.FindOne(ctx, bson.M{"email": email}).Decode(&existingAccount)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "HandleRecoveryRequest",
+			"error":  err.Error(),
+		}, "Error finding account")
 		return err
 	}
 	if len(existingAccount.Email) == 0 {
 		span.RecordError(data.ErrEmailDoesntExist())
 		span.SetStatus(codes.Error, data.ErrEmailDoesntExist().Error())
 		ur.logger.Println(errAccount, data.ErrEmailDoesntExist())
+		ur.custLogger.Error(logrus.Fields{
+			"method": "HandleRecoveryRequest",
+			"error":  data.ErrEmailDoesntExist().Error(),
+		}, "Email doesn't exist")
 		return data.ErrEmailDoesntExist()
 	}
 
@@ -492,6 +680,10 @@ func (ur *UserRepository) HandleRecoveryRequest(ctx context.Context, email strin
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error saving information in database:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "HandleRecoveryRequest",
+			"error":  err.Error(),
+		}, "Error saving information in database")
 		return err
 	}
 	err = SendRecoveryEmail(email, newId)
@@ -499,21 +691,36 @@ func (ur *UserRepository) HandleRecoveryRequest(ctx context.Context, email strin
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error sending recovery email:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "HandleRecoveryRequest",
+			"error":  err.Error(),
+		}, "Error sending recovery email")
 		return err
 	}
 	span.SetStatus(codes.Ok, "Successfully handled the request")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "HandleRecoveryRequest",
+		"email":  email,
+	}, "Successful HandleRecoveryRequest")
 	return nil
 }
 
 func (ur *UserRepository) ResetPassword(ctx context.Context, token string, password string) error {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.ResetPassword")
 	defer span.End()
-
+	ur.custLogger.Info(logrus.Fields{
+		"method": "ResetPassword",
+		"token":  token,
+	}, "Starting ResetPassword")
 	email, err := ur.redis.Get(constructKeyForRecovery(token)).Result()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ResetPassword",
+			"error":  err.Error(),
+		}, "Error finding a token")
 		return err
 	}
 
@@ -528,12 +735,20 @@ func (ur *UserRepository) ResetPassword(ctx context.Context, token string, passw
 			span.RecordError(errors.New(errAccount))
 			span.SetStatus(codes.Error, errAccount)
 			ur.logger.Println("Error: Account not found for email:", email)
+			ur.custLogger.Error(logrus.Fields{
+				"method": "ResetPassword",
+				"error":  err.Error(),
+			}, "Error finding an account")
 			return errors.New(errAccount)
 		}
 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println(errAccount, err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ResetPassword",
+			"error":  err.Error(),
+		}, err.Error())
 		return err
 	}
 
@@ -542,6 +757,10 @@ func (ur *UserRepository) ResetPassword(ctx context.Context, token string, passw
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Password forbidden:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ResetPassword",
+			"error":  err.Error(),
+		}, "Password forbidden")
 		return err
 	}
 
@@ -550,6 +769,10 @@ func (ur *UserRepository) ResetPassword(ctx context.Context, token string, passw
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error hashing password:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ResetPassword",
+			"error":  err.Error(),
+		}, "Error hashing password")
 		return err
 	}
 
@@ -564,10 +787,18 @@ func (ur *UserRepository) ResetPassword(ctx context.Context, token string, passw
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error updating account:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "ResetPassword",
+			"error":  err.Error(),
+		}, "Error updating the account")
 		return err
 	}
 
 	span.SetStatus(codes.Ok, "Successfully changed password")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "ResetPassword",
+		"token":  token,
+	}, "Successful ResetPassword")
 	return nil
 }
 
@@ -597,10 +828,18 @@ func (us *UserRepository) Delete(ctx context.Context, userID string) error {
 	ctx, span := us.tracer.Start(ctx, "UserRepository.Delete")
 	defer span.End()
 	objectID, err := primitive.ObjectIDFromHex(userID)
+	us.custLogger.Info(logrus.Fields{
+		"method": "Delete",
+		"ID":     userID,
+	}, "Starting Delete")
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		us.logger.Printf("Invalid userID format: %v", err)
+		us.custLogger.Error(logrus.Fields{
+			"method": "Delete",
+			"error":  err.Error(),
+		}, "Invalid userID format")
 		return err
 	}
 
@@ -610,6 +849,10 @@ func (us *UserRepository) Delete(ctx context.Context, userID string) error {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		us.logger.Printf("Error deleting user: %v", err)
+		us.custLogger.Error(logrus.Fields{
+			"method": "Delete",
+			"error":  err.Error(),
+		}, "Error deleting user")
 		return err
 	}
 
@@ -617,22 +860,38 @@ func (us *UserRepository) Delete(ctx context.Context, userID string) error {
 		span.RecordError(mongo.ErrNoDocuments)
 		span.SetStatus(codes.Error, mongo.ErrNoDocuments.Error())
 		us.logger.Printf("No user found with ID %s", userID)
+		us.custLogger.Error(logrus.Fields{
+			"method": "Delete",
+			"error":  mongo.ErrNoDocuments.Error(),
+		}, "No user found with ID")
 		return mongo.ErrNoDocuments
 	}
 
 	span.SetStatus(codes.Ok, "Successfully deleted user")
 	us.logger.Printf("User with ID %s successfully deleted", userID)
+	us.custLogger.Info(logrus.Fields{
+		"method": "Delete",
+		"ID":     userID,
+	}, "Successful Delete")
 	return nil
 }
 
 func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bool, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.VerifyRecaptcha")
 	defer span.End()
+	ur.custLogger.Info(logrus.Fields{
+		"method": "VerifyRecaptcha",
+		"token":  token,
+	}, "Starting VerifyRecaptcha")
 	if token == "" {
 		span.RecordError(errors.New("token is empty"))
 		span.SetStatus(codes.Error, "Token is empty")
 		fmt.Println("token is empty")
 		ur.logger.Println("Empty reCAPTCHA token")
+		ur.custLogger.Error(logrus.Fields{
+			"method": "VerifyRecaptcha",
+			"error":  errors.New("token is empty"),
+		}, "Token is empty")
 		return false, errors.New("empty reCAPTCHA token")
 	}
 
@@ -641,8 +900,14 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 	secret := os.Getenv("CAPTCHA")
 	if secret == "" {
 		ur.logger.Println("RECAPTCHA_SECRET_KEY is not set")
+		ur.custLogger.Warn(logrus.Fields{
+			"method": "VerifyCaptcha",
+		}, "RECAPTCHA_SECRET_KEY is not set")
 	} else {
 		ur.logger.Println("RECAPTCHA_SECRET_KEY successfully loaded")
+		ur.custLogger.Info(logrus.Fields{
+			"method": "VerifyCaptcha",
+		}, "RECAPTCHA_SECRET_KEY is not set")
 	}
 
 	resp, err := http.PostForm("https://www.google.com/recaptcha/api/siteverify",
@@ -653,6 +918,10 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 		span.SetStatus(codes.Error, err.Error())
 		fmt.Println(err)
 		ur.logger.Println("Error calling reCAPTCHA API:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "VerifyRecaptcha",
+			"error":  err.Error(),
+		}, "Error calling reCAPTCHA API")
 		return false, err
 	}
 	defer resp.Body.Close()
@@ -664,6 +933,10 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 		span.SetStatus(codes.Error, err.Error())
 		fmt.Println(err)
 		ur.logger.Println("Error decoding reCAPTCHA response:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "VerifyRecaptcha",
+			"error":  err.Error(),
+		}, "Error decoding reCAPTCHA response")
 		return false, err
 	}
 
@@ -672,17 +945,28 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 		span.SetStatus(codes.Error, "reCAPTCHA response error")
 		fmt.Println("recaptcha failed:", recaptchaResp.ErrorCodes)
 		ur.logger.Println("reCAPTCHA verification failed:", recaptchaResp.ErrorCodes)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "VerifyRecaptcha",
+			"error":  errors.New("reCAPTCHA response error"),
+		}, "reCAPTCHA response error")
 		return false, errors.New("reCAPTCHA verification failed")
 	}
 
 	span.SetStatus(codes.Ok, "Successfully verified reCAPTCHA token")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "VerifyRecaptcha",
+		"token":  token,
+	}, "Successful VerifyRecaptcha")
 	return true, nil
 }
 
 func (ur *UserRepository) GetUsersByIds(ctx context.Context, ids []string) ([]data.Account, error) {
 	ctx, span := ur.tracer.Start(ctx, "UserRepository.GetUsersByIds")
 	defer span.End()
-
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUsersByIds",
+		"ids":    len(ids),
+	}, "Starting GetUsersByIds")
 	accountCollection := ur.getAccountCollection()
 
 	var objectIds []primitive.ObjectID
@@ -692,6 +976,10 @@ func (ur *UserRepository) GetUsersByIds(ctx context.Context, ids []string) ([]da
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			ur.logger.Println("Error parsing ObjectID:", err)
+			ur.custLogger.Error(logrus.Fields{
+				"method": "GetUsersByIds",
+				"error":  err.Error(),
+			}, "Error parsing ObjectID")
 			return nil, fmt.Errorf("invalid user ID format: %s", id)
 		}
 		objectIds = append(objectIds, objectId)
@@ -703,6 +991,10 @@ func (ur *UserRepository) GetUsersByIds(ctx context.Context, ids []string) ([]da
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error finding accounts:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUsersByIds",
+			"error":  err.Error(),
+		}, "Error finding accounts")
 		return nil, err
 	}
 	defer cursor.Close(ctx)
@@ -712,9 +1004,17 @@ func (ur *UserRepository) GetUsersByIds(ctx context.Context, ids []string) ([]da
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		ur.logger.Println("Error decoding accounts:", err)
+		ur.custLogger.Error(logrus.Fields{
+			"method": "GetUsersByIds",
+			"error":  err.Error(),
+		}, "Error decoding")
 		return nil, err
 	}
 
 	span.SetStatus(codes.Ok, "Successfully retrieved users")
+	ur.custLogger.Info(logrus.Fields{
+		"method": "GetUsersByIds",
+		"users":  len(users),
+	}, "Successful GetUsersByIds")
 	return users, nil
 }

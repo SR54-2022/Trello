@@ -18,15 +18,15 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"main.go/customLogger"
-	"main.go/data"
-	"main.go/domain"
-	"main.go/repository"
-	"main.go/service"
 	"net/http"
 	"os"
 	"regexp"
 	"time"
+	"user-service/customLogger"
+	"user-service/data"
+	"user-service/domain"
+	"user-service/repository"
+	"user-service/service"
 )
 
 type KeyAccount struct{}
@@ -635,7 +635,7 @@ func (uh *UserHandler) VerifyTokenExistence(rw http.ResponseWriter, h *http.Requ
 	}
 	repo, _ := repository.New(ctx, uh.logger, uh.custLogger, uh.tracer)
 
-	cache, err := repository.NewCache(uh.logger, repo, uh.tracer)
+	cache, err := repository.NewCache(uh.logger, repo, uh.tracer, uh.custLogger)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())

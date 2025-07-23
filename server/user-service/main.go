@@ -12,14 +12,14 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"log"
-	"main.go/customLogger"
-	"main.go/handlers"
-	"main.go/repository"
-	"main.go/service"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
+	"user-service/customLogger"
+	"user-service/handlers"
+	"user-service/repository"
+	"user-service/service"
 )
 
 func main() {
@@ -44,7 +44,7 @@ func main() {
 	if err != nil {
 		logger.Fatal(err)
 	}
-	uc, err := repository.NewCache(logger, ur, tracer)
+	uc, err := repository.NewCache(logger, ur, tracer, custLogger)
 	us := service.NewUserService(ur, uc, logger, tracer)
 	uh := handlers.NewUserHandler(logger, us, tracer, custLogger)
 

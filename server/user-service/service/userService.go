@@ -6,9 +6,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"log"
-	"main.go/data"
-	"main.go/repository"
-	"main.go/utils"
+	"user-service/data"
+	"user-service/repository"
+	"user-service/utils"
 )
 
 type UserService struct {

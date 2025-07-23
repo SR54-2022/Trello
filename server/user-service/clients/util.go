@@ -2,9 +2,9 @@ package clients
 
 import (
 	"errors"
-	"main.go/domain"
 	"net/url"
 	"time"
+	"user-service/domain"
 
 	"github.com/sony/gobreaker"
 )

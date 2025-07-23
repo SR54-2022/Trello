@@ -65,8 +65,7 @@ export class MenuComponent implements OnInit {
         error: (error) => {
           console.log("Deleting account failed.");
           console.log("Response Body:", error.error);
-          // alert(error.error)
-          this.toastrService.error('Deleting account failed' + error.error);
+          this.toastrService.error('Deleting account failed. ' + error.error);
         }
       })
 

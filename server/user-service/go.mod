@@ -1,4 +1,4 @@
-module main.go
+module user-service
 
 go 1.22.1
 
