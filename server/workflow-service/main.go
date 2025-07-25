@@ -120,7 +120,6 @@ func main() {
 	router := mux.NewRouter()
 	router.Use(handler.ExtractTraceInfoMiddleware)
 
-	//TODO: add authorization to every route
 	//router.Handle("/workflow/{limit}", workflowHandler.MiddlewareExtractUserFromCookie(workflowHandler.MiddlewareCheckRoles([]string{"manager", "member"}, http.HandlerFunc(workflowHandler.GetAllTasks)))).Methods(http.MethodGet)
 	router.Handle("/workflow/{limit}", http.HandlerFunc(workflowHandler.GetAllTasks)).Methods(http.MethodGet)
 	router.Handle("/workflow", http.HandlerFunc(workflowHandler.PostTask)).Methods(http.MethodPost)

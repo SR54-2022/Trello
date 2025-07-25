@@ -393,7 +393,6 @@ export class ProjectComponent implements OnInit {
   private craeteWorkflowTask(task: Task) {
     const url = `/api/workflow-server/workflow`;
 
-    // TODO: find out why it always returns 201 when it doesnt create dependency
     this.http.post(url, task).subscribe({
       next: () => {
         console.log(`Workflow created successfully: `);
@@ -538,7 +537,7 @@ export class ProjectComponent implements OnInit {
     }
   }
 
-  onDrop(event: CdkDragDrop<any[]>) { //TODO: fix this to not openTasks
+  onDrop(event: CdkDragDrop<any[]>) {
     if (event.previousContainer !== event.container) {
       console.log('Dropped item:', event.item.data);
       console.log('Previous container:', event.previousContainer.id);

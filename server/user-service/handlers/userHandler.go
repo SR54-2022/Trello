@@ -263,7 +263,7 @@ func (uh *UserHandler) DeleteUser(rw http.ResponseWriter, h *http.Request) {
 		return
 	}
 
-	if err := uh.handleProjectServiceResponse(ctx, rw, resp, userID, manager.Role, cookie, h, span); err != nil {
+	if err := uh.handleProjectServiceResponse(ctx, rw, resp, userID, manager.Role, cookie, span); err != nil {
 		return
 	}
 
@@ -361,7 +361,6 @@ func (uh *UserHandler) handleProjectServiceResponse(
 	resp *http.Response,
 	userID, role string,
 	authCookie *http.Cookie,
-	h *http.Request,
 	span trace.Span,
 ) error {
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {

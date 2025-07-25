@@ -39,8 +39,16 @@ type UserRepository struct {
 }
 
 const (
-	errAccount        = "Error finding account:"
-	recoveryConstruct = "recovery:%s"
+	errAccount         = "Error finding account:"
+	recoveryConstruct  = "recovery:%s"
+	errUser            = "Error finding user"
+	successfulID       = "Successfully found ID"
+	errRole            = "Error finding role"
+	successfulRole     = "Successfully found role"
+	successfulPassword = "Successfully changed password"
+	emptyToken         = "token is empty"
+	recaptchaNotSet    = "RECAPTCHA_SECRET_KEY is not set"
+	recaptchaErr       = "reCAPTCHA response error"
 )
 
 func constructKeyForRecovery(a string) string {
@@ -350,14 +358,14 @@ func (ur *UserRepository) GetUserIdByEmail(ctx context.Context, email string) (p
 		ur.custLogger.Error(logrus.Fields{
 			"method": "GetUserIdByEmail",
 			"error":  err.Error(),
-		}, "Error finding user")
+		}, errUser)
 		return primitive.NilObjectID, err
 	}
 	ur.custLogger.Info(logrus.Fields{
 		"method": "GetUserIdByEmail",
 		"ID":     existingAccount.ID,
-	}, "Successfully found ID")
-	span.SetStatus(codes.Ok, "Successfully found ID")
+	}, successfulID)
+	span.SetStatus(codes.Ok, successfulID)
 	return existingAccount.ID, nil
 }
 
@@ -391,15 +399,15 @@ func (ur *UserRepository) GetRoleForMagic(ctx context.Context, token string) (st
 		ur.custLogger.Error(logrus.Fields{
 			"method": "GetRoleForMagic",
 			"error":  err.Error(),
-		}, "Error finding role")
+		}, errRole)
 		return "", err
 	}
-	span.SetStatus(codes.Ok, "Successfully found role")
+	span.SetStatus(codes.Ok, successfulRole)
 	ur.custLogger.Info(logrus.Fields{
 		"method": "GetRoleForMagic",
 		"role":   existingAccount.Role,
 	}, "Successfully found GetRoleForMagic")
-	span.SetStatus(codes.Ok, "Successfully found ID")
+	span.SetStatus(codes.Ok, successfulID)
 	return existingAccount.Role, nil
 }
 
@@ -423,14 +431,14 @@ func (ur *UserRepository) GetUserRoleByEmail(ctx context.Context, email string) 
 		ur.custLogger.Error(logrus.Fields{
 			"method": "GetUserRoleByEmail",
 			"error":  err.Error(),
-		}, "Error finding role")
+		}, errRole)
 		return "", err
 	}
-	span.SetStatus(codes.Ok, "Successfully found role")
+	span.SetStatus(codes.Ok, successfulRole)
 	ur.custLogger.Info(logrus.Fields{
 		"method": "GetUserRoleByEmail",
 		"role":   existingAccount.Role,
-	}, "Successfully found role")
+	}, successfulRole)
 	return existingAccount.Role, nil
 }
 
@@ -451,7 +459,7 @@ func (ur *UserRepository) GetUserByEmail(ctx context.Context, email string) (dat
 		ur.custLogger.Error(logrus.Fields{
 			"method": "GetUserByEmail",
 			"error":  err.Error(),
-		}, "Error finding role")
+		}, errRole)
 		return data.Account{}, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found user")
@@ -490,7 +498,7 @@ func (ur *UserRepository) GetUserById(ctx context.Context, id string) (data.Acco
 		ur.custLogger.Error(logrus.Fields{
 			"method": "GetUserById",
 			"error":  err.Error(),
-		}, "Error finding user")
+		}, errUser)
 		return data.Account{}, err
 	}
 	span.SetStatus(codes.Ok, "Successfully found user")
@@ -516,7 +524,7 @@ func (ur *UserRepository) CheckIfPasswordIsSame(ctx context.Context, id string, 
 		ur.custLogger.Error(logrus.Fields{
 			"method": "CheckIfPasswordIsSame",
 			"error":  err.Error(),
-		}, "Error finding user")
+		}, errUser)
 		return false
 	}
 	err = bcrypt.CompareHashAndPassword([]byte(acc.Password), []byte(password))
@@ -598,10 +606,10 @@ func (ur *UserRepository) ChangePassword(ctx context.Context, id string, passwor
 		return err
 	}
 
-	span.SetStatus(codes.Ok, "Successfully changed password")
+	span.SetStatus(codes.Ok, successfulPassword)
 	ur.custLogger.Info(logrus.Fields{
 		"method": "ChangePassword",
-	}, "Successfully changed password")
+	}, successfulPassword)
 	return nil
 }
 
@@ -794,7 +802,7 @@ func (ur *UserRepository) ResetPassword(ctx context.Context, token string, passw
 		return err
 	}
 
-	span.SetStatus(codes.Ok, "Successfully changed password")
+	span.SetStatus(codes.Ok, successfulPassword)
 	ur.custLogger.Info(logrus.Fields{
 		"method": "ResetPassword",
 		"token":  token,
@@ -884,14 +892,14 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 		"token":  token,
 	}, "Starting VerifyRecaptcha")
 	if token == "" {
-		span.RecordError(errors.New("token is empty"))
-		span.SetStatus(codes.Error, "Token is empty")
-		fmt.Println("token is empty")
+		span.RecordError(errors.New(emptyToken))
+		span.SetStatus(codes.Error, emptyToken)
+		fmt.Println(emptyToken)
 		ur.logger.Println("Empty reCAPTCHA token")
 		ur.custLogger.Error(logrus.Fields{
 			"method": "VerifyRecaptcha",
-			"error":  errors.New("token is empty"),
-		}, "Token is empty")
+			"error":  errors.New(emptyToken),
+		}, emptyToken)
 		return false, errors.New("empty reCAPTCHA token")
 	}
 
@@ -899,15 +907,15 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 
 	secret := os.Getenv("CAPTCHA")
 	if secret == "" {
-		ur.logger.Println("RECAPTCHA_SECRET_KEY is not set")
+		ur.logger.Println(recaptchaNotSet)
 		ur.custLogger.Warn(logrus.Fields{
 			"method": "VerifyCaptcha",
-		}, "RECAPTCHA_SECRET_KEY is not set")
+		}, recaptchaNotSet)
 	} else {
 		ur.logger.Println("RECAPTCHA_SECRET_KEY successfully loaded")
 		ur.custLogger.Info(logrus.Fields{
 			"method": "VerifyCaptcha",
-		}, "RECAPTCHA_SECRET_KEY is not set")
+		}, recaptchaNotSet)
 	}
 
 	resp, err := http.PostForm("https://www.google.com/recaptcha/api/siteverify",
@@ -941,14 +949,14 @@ func (ur *UserRepository) VerifyRecaptcha(ctx context.Context, token string) (bo
 	}
 
 	if !recaptchaResp.Success {
-		span.RecordError(errors.New("reCAPTCHA response error"))
-		span.SetStatus(codes.Error, "reCAPTCHA response error")
+		span.RecordError(errors.New(recaptchaErr))
+		span.SetStatus(codes.Error, recaptchaErr)
 		fmt.Println("recaptcha failed:", recaptchaResp.ErrorCodes)
 		ur.logger.Println("reCAPTCHA verification failed:", recaptchaResp.ErrorCodes)
 		ur.custLogger.Error(logrus.Fields{
 			"method": "VerifyRecaptcha",
-			"error":  errors.New("reCAPTCHA response error"),
-		}, "reCAPTCHA response error")
+			"error":  errors.New(recaptchaErr),
+		}, recaptchaErr)
 		return false, errors.New("reCAPTCHA verification failed")
 	}
 
